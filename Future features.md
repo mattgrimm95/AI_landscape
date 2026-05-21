@@ -6,3 +6,4 @@
 - Daily news
 - POC suggestions
 - Topic focuser
+- Artifacts to easily ingest and continue work on disconnected networks
