@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Sample Defense Feed</title>
+    <link>https://example.com/defense</link>
+    <description>A deterministic sample feed used for demos and tests.</description>
+
+    <item>
+      <title>Pentagon Expands Artificial Intelligence Program with Anduril</title>
+      <link>https://example.com/defense/pentagon-ai-anduril</link>
+      <pubDate>Mon, 19 May 2026 09:00:00 GMT</pubDate>
+      <description><![CDATA[<p>The <strong>Pentagon</strong> announced a major expansion of its AI work.</p>]]></description>
+      <content:encoded><![CDATA[<p>The Pentagon announced a major expansion of its Artificial Intelligence
+      program on Monday, awarding new work to Anduril Industries. Leaders at the
+      Department of Defense said the initiative will accelerate autonomous drone
+      development across the United States. DARPA will help fund the research.</p>]]></content:encoded>
+    </item>
+
+    <item>
+      <title>Ukraine Receives HIMARS Systems as Russia Tensions Rise</title>
+      <link>https://example.com/defense/ukraine-himars</link>
+      <pubDate>Tue, 20 May 2026 11:30:00 GMT</pubDate>
+      <description><![CDATA[<p>Ukraine received additional HIMARS launchers this week as tensions
+      with Russia intensified. NATO members pledged further support, and the
+      United States coordinated the delivery.</p>]]></description>
+    </item>
+
+    <item>
+      <title>Lockheed Martin Wins F-35 Contract from U.S. Air Force</title>
+      <link>https://example.com/defense/lockheed-f35-contract</link>
+      <pubDate>Wed, 21 May 2026 08:15:00 GMT</pubDate>
+      <description><![CDATA[<p>Lockheed Martin secured a new F-35 contract from the U.S. Air Force.
+      The Pentagon valued the multi-year deal at billions of dollars. Boeing also
+      competed for related sustainment work.</p>]]></description>
+    </item>
+
+    <item>
+      <title>China Accelerates Hypersonic Weapons Testing Near Taiwan</title>
+      <link>https://example.com/defense/china-hypersonic-taiwan</link>
+      <pubDate>Wed, 21 May 2026 14:45:00 GMT</pubDate>
+      <description><![CDATA[<p>China expanded Hypersonic Weapons testing near Taiwan this month.
+      The People's Liberation Army conducted large exercises. Analysts at the
+      Pentagon monitored the activity closely.</p>]]></description>
+    </item>
+
+  </channel>
+</rss>

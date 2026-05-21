@@ -1,0 +1,8 @@
+# Runtime dependency.
+beautifulsoup4>=4.9
+
+# Optional: enables the higher-accuracy spaCy NER backend.
+# The pipeline runs fully without it (rule-based backend is the default).
+#   pip install spacy
+#   python -m spacy download en_core_web_sm
+# spacy>=3.5

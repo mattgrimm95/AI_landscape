@@ -1,0 +1,151 @@
+"""Step 5 of the flow: the knowledge graph database.
+
+`knowledge_graph.db` holds canonical nodes, the aliases that resolve to them,
+and weighted relationship edges. It is a derived view: `reconcile` rebuilds it
+in full from the raw log, so it can always be regenerated from the source of
+truth.
+"""
+
+import json
+import sqlite3
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS nodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name  TEXT NOT NULL,
+    type            TEXT NOT NULL,
+    first_seen      TEXT,
+    last_seen       TEXT,
+    mention_count   INTEGER NOT NULL DEFAULT 0,
+    document_count  INTEGER NOT NULL DEFAULT 0,
+    metadata        TEXT,
+    UNIQUE(canonical_name, type)
+);
+CREATE TABLE IF NOT EXISTS aliases (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id   INTEGER NOT NULL REFERENCES nodes(id),
+    alias     TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS edges (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    src_id     INTEGER NOT NULL REFERENCES nodes(id),
+    dst_id     INTEGER NOT NULL REFERENCES nodes(id),
+    relation   TEXT NOT NULL,
+    weight     INTEGER NOT NULL DEFAULT 1,
+    metadata   TEXT,
+    UNIQUE(src_id, dst_id, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_id);
+CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_id);
+"""
+
+
+class KnowledgeGraphStore:
+    """Store for knowledge-graph nodes, aliases, and relationship edges."""
+
+    def __init__(self, path):
+        self.path = str(path)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.executescript(_SCHEMA)
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+
+    def clear(self):
+        """Remove all graph data. Used by `reconcile` to rebuild from the log."""
+        self.conn.executescript(
+            "DELETE FROM edges; DELETE FROM aliases; DELETE FROM nodes;"
+        )
+        self.conn.commit()
+
+    def insert_node(
+        self,
+        canonical_name,
+        node_type,
+        first_seen="",
+        last_seen="",
+        mention_count=0,
+        document_count=0,
+        metadata=None,
+    ):
+        cur = self.conn.execute(
+            "INSERT INTO nodes "
+            "(canonical_name, type, first_seen, last_seen, mention_count, "
+            "document_count, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                canonical_name,
+                node_type,
+                first_seen,
+                last_seen,
+                mention_count,
+                document_count,
+                json.dumps(metadata or {}),
+            ),
+        )
+        return cur.lastrowid
+
+    def insert_alias(self, node_id, alias):
+        self.conn.execute(
+            "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?, ?)",
+            (node_id, alias),
+        )
+
+    def insert_edge(self, src_id, dst_id, relation, weight=1, metadata=None):
+        self.conn.execute(
+            "INSERT INTO edges (src_id, dst_id, relation, weight, metadata) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (src_id, dst_id, relation, weight, json.dumps(metadata or {})),
+        )
+
+    def commit(self):
+        self.conn.commit()
+
+    def node_by_alias(self, alias):
+        row = self.conn.execute(
+            "SELECT n.* FROM nodes n JOIN aliases a ON a.node_id = n.id "
+            "WHERE a.alias = ?",
+            (alias,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def nodes(self):
+        return [
+            dict(r)
+            for r in self.conn.execute("SELECT * FROM nodes ORDER BY id")
+        ]
+
+    def aliases(self):
+        return [
+            dict(r)
+            for r in self.conn.execute("SELECT * FROM aliases ORDER BY id")
+        ]
+
+    def edges(self):
+        return [
+            dict(r)
+            for r in self.conn.execute("SELECT * FROM edges ORDER BY id")
+        ]
+
+    def top_nodes(self, limit=10):
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM nodes ORDER BY mention_count DESC, id LIMIT ?",
+                (limit,),
+            )
+        ]
+
+    def count_nodes(self):
+        return self.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+
+    def count_edges(self):
+        return self.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
