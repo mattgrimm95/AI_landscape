@@ -144,3 +144,19 @@ A high-level record of steps taken and decisions made while implementing the
 - Behaviour preserved: `demo` still yields 18 nodes / 49 edges, and a
   `rebuild` from the existing 81-document corpus still yields 1,786 nodes /
   27,912 edges — identical to before the refactor.
+
+## 2026-05-21 — Daily scrape automation
+
+- Added `scripts/daily_scrape.ps1`: runs `ailandscape.cli run`, then commits
+  and pushes the corpus when new articles were added. Paths are resolved
+  relative to the script's own location (repo) and from `PATH` (python/git),
+  so nothing environment-specific is hardcoded — the script leaks no username
+  or machine layout and is safe to commit to the public repo.
+- Registered a Windows Task Scheduler job ("AI_landscape Daily Scrape") that
+  runs the script daily at 19:00 local time (7PM Eastern; the OS handles the
+  EST/EDT switch). `StartWhenAvailable` lets a missed run catch up when the
+  PC next wakes. The scheduled-task entry is machine-local config, not part
+  of the repo.
+- Chose Windows Task Scheduler over a cloud scheduled agent: the job is a
+  fixed, deterministic command that needs no AI reasoning, so a local
+  cron-style task is free, has no billing question, and is the right tool.
