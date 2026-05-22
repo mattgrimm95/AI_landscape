@@ -2,8 +2,9 @@
 
 Builds the knowledge graph (step 5) from the corpus documents and the NER
 output log: raw entity mentions are normalized, de-duplicated into canonical
-nodes via an alias index, and linked by co-occurrence edges (entities sharing
-a document).
+nodes via an alias index, coreferenced (partial person names folded into
+their full-name node), and linked by co-occurrence edges (entities sharing a
+document).
 """
 
 import itertools
@@ -75,6 +76,33 @@ def load_corrections(path):
     merge = {normalize(k): v for k, v in data.get("merge", {}).items()}
     ignore = {normalize(x) for x in data.get("ignore", [])}
     return merge, ignore
+
+
+def _coreference(nodes):
+    """Detect person coreference merges (source key -> target key).
+
+    A one-word person name that is the last word of exactly *one* multi-word
+    person node merges into it — e.g. "Hegseth" -> "Pete Hegseth". The merge
+    is made only when there is a single candidate, so two different people
+    who share a surname are never conflated.
+    """
+    by_last_name = {}      # surname (lower) -> list of multi-word person keys
+    single_persons = []    # (key, lowercased single token)
+    for key, node in nodes.items():
+        if node["type"] != "person":
+            continue
+        words = node["canonical"].split()
+        if len(words) >= 2:
+            by_last_name.setdefault(words[-1].lower(), []).append(key)
+        elif len(words) == 1:
+            single_persons.append((key, words[0].lower()))
+
+    merge_into = {}
+    for key, token in single_persons:
+        candidates = by_last_name.get(token, [])
+        if len(candidates) == 1 and candidates[0] != key:
+            merge_into[key] = candidates[0]
+    return merge_into
 
 
 def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
@@ -165,6 +193,34 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         if 2 <= len(doc_keys) <= _MAX_EDGE_ENTITIES:
             for pair in itertools.combinations(sorted(doc_keys), 2):
                 edges[pair] = edges.get(pair, 0) + 1
+
+    # Step 4b: coreference — fold partial names into their fuller node, then
+    # re-point that node's edges (dropping the resulting self-loops).
+    merge_into = _coreference(nodes)
+    for src_key, tgt_key in merge_into.items():
+        src = nodes.get(src_key)
+        tgt = nodes.get(tgt_key)
+        if src is None or tgt is None:
+            continue
+        tgt["mentions"] += src["mentions"]
+        tgt["docs"] |= src["docs"]
+        tgt["aliases"] |= src["aliases"]
+        if src["first"]:
+            tgt["first"] = min(tgt["first"] or src["first"], src["first"])
+        if src["last"]:
+            tgt["last"] = max(tgt["last"] or src["last"], src["last"])
+        del nodes[src_key]
+    if merge_into:
+        remapped = {}
+        for (key_a, key_b), weight in edges.items():
+            key_a = merge_into.get(key_a, key_a)
+            key_b = merge_into.get(key_b, key_b)
+            if key_a == key_b:
+                continue
+            pair = (key_a, key_b) if key_a < key_b else (key_b, key_a)
+            remapped[pair] = remapped.get(pair, 0) + weight
+        edges = remapped
+        log("coreference: merged %d partial-name nodes" % len(merge_into))
 
     kg_store.clear()
     key_to_id = {}

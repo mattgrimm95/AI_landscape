@@ -308,3 +308,24 @@ A high-level record of steps taken and decisions made while implementing the
   as a shareable-snapshot export.
 - Tests cover the API with FastAPI's TestClient (config paths monkeypatched
   to a temp graph). 55 tests pass.
+
+## 2026-05-22 — Quality pass: coreference, layout, data quality, README
+
+- **Coreference** (`reconcile`): a single-word person name that is the last
+  word of exactly one multi-word person node folds into it ("Hegseth" ->
+  "Pete Hegseth"); ambiguous surnames (two people, same last name) are left
+  alone. Edges are re-pointed through the merge, self-loops dropped. The
+  rebuild merged 133 partial-name nodes (6,000 -> 5,867 nodes).
+- **Graph layout**: the web visualization now uses the fcose layout for
+  cluster-respecting spread. Labels are decluttered — font size scales with
+  node prominence and small labels hide when zoomed out. The default minimum
+  edge weight was raised so the default view is far less dense (372 vs 635
+  edges) and visibly spread, with groupings still close.
+- **Data quality**: the overview gained distribution metrics (nodes by
+  mention count, edges by weight) and an "isolated nodes" signal; a compact
+  Overview panel was added to the web sidebar.
+- **README.md** added (it was missing — a skills_plan requirement):
+  high-level description, the pipeline flow, setup, and all CLI commands.
+- Completed the doable TODO items. SAM.gov / SBIR data sources and typed
+  semantic relationships remain in TODO — they need API keys / relation
+  extraction and are larger efforts.

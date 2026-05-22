@@ -54,6 +54,21 @@ def _counter_rows(counter, total):
     ]
 
 
+def _bucketize(values, bounds):
+    """Count values into ordered buckets.
+
+    `bounds` is a list of (upper_inclusive, label); an upper of None is the
+    catch-all final bucket. Returns a list of (label, count).
+    """
+    counts = [0] * len(bounds)
+    for value in values:
+        for i, (upper, _label) in enumerate(bounds):
+            if upper is None or value <= upper:
+                counts[i] += 1
+                break
+    return [(label, counts[i]) for i, (_upper, label) in enumerate(bounds)]
+
+
 def _possible_partial_duplicates(nodes):
     """Single-word nodes whose word is the last word of a multi-word node of
     the same type — likely the same entity referred to by a partial name."""
@@ -111,7 +126,9 @@ def build_overview(documents, ner_log, kg_store, run_history_path=None):
     ]
 
     singletons = sum(1 for n in nodes if n["mention_count"] <= 1)
+    isolated = sum(1 for n in nodes if degree.get(n["id"], 0) == 0)
     dups = _possible_partial_duplicates(nodes)
+    pct = lambda count: (100.0 * count / node_count) if node_count else 0.0
 
     return {
         "funnel": funnel,
@@ -126,9 +143,21 @@ def build_overview(documents, ner_log, kg_store, run_history_path=None):
             nodes, key=lambda n: n["mention_count"], reverse=True
         )[:10],
         "most_connected": most_connected,
+        "distributions": {
+            "mentions": _bucketize(
+                (n["mention_count"] for n in nodes),
+                [(1, "1 (one-off)"), (5, "2-5"), (20, "6-20"), (None, "21+")],
+            ),
+            "edge_weight": _bucketize(
+                (e["weight"] for e in edges),
+                [(1, "1 (weak)"), (4, "2-4"), (9, "5-9"), (None, "10+")],
+            ),
+        },
         "quality": {
             "singletons": singletons,
-            "singleton_pct": (100.0 * singletons / node_count) if node_count else 0.0,
+            "singleton_pct": pct(singletons),
+            "isolated": isolated,
+            "isolated_pct": pct(isolated),
             "partial_name_dups": len(dups),
             "examples": dups[:5],
         },
@@ -216,11 +245,24 @@ def render_overview(data):
             "  %2d. %-26s %-13s %6s links" % (i, name[:26], etype, _int(deg))
         )
 
+    dist = data["distributions"]
+    out += ["", "DISTRIBUTIONS  (the shape of the data)"]
+    out.append("  Nodes by mention count:")
+    for label, count in dist["mentions"]:
+        out.append("    %-14s %10s" % (label, _int(count)))
+    out.append("  Edges by co-occurrence weight:")
+    for label, count in dist["edge_weight"]:
+        out.append("    %-14s %10s" % (label, _int(count)))
+
     q = data["quality"]
-    out += ["", "DATA QUALITY (targets for improvement)"]
+    out += ["", "DATA QUALITY  (problem spots to improve)"]
     out.append(
         "  %-24s %10s   (%.1f%% of nodes) - likely noise or fragments"
         % ("Single-mention nodes", _int(q["singletons"]), q["singleton_pct"])
+    )
+    out.append(
+        "  %-24s %10s   (%.1f%% of nodes) - no relationships, hard to place"
+        % ("Isolated nodes", _int(q["isolated"]), q["isolated_pct"])
     )
     out.append(
         "  %-24s %10s   single-word names that match a fuller name"

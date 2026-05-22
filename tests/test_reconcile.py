@@ -121,6 +121,31 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(summary["edges"], 1)
         self.assertEqual(self.kg.edges()[0]["weight"], 2)
 
+    def test_person_coreference_merges_partial_name(self):
+        self._add_doc("h1", [{"text": "Pete Hegseth", "label": "person"}])
+        self._add_doc("h2", [{"text": "Hegseth", "label": "person"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # "Hegseth" folds into "Pete Hegseth" — one node, mentions combined.
+        self.assertEqual(summary["nodes"], 1)
+        node = self.kg.node_by_alias("hegseth")
+        self.assertIsNotNone(node)
+        self.assertEqual(node["canonical_name"], "Pete Hegseth")
+        self.assertEqual(node["mention_count"], 2)
+        self.assertEqual(node["document_count"], 2)
+
+    def test_coreference_leaves_ambiguous_surnames_alone(self):
+        self._add_doc(
+            "h1",
+            [
+                {"text": "Pete Hegseth", "label": "person"},
+                {"text": "Jane Hegseth", "label": "person"},
+            ],
+        )
+        self._add_doc("h2", [{"text": "Hegseth", "label": "person"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # Two people share the surname, so bare "Hegseth" stays its own node.
+        self.assertEqual(summary["nodes"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

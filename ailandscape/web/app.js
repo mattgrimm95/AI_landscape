@@ -18,6 +18,49 @@ let cy = null;
 let currentParams = {};
 let totalNodes = 0;
 
+// Use the fcose layout (better cluster spread) when its extension loaded.
+let LAYOUT_NAME = "cose";
+try {
+  if (window.cytoscapeFcose) {
+    cytoscape.use(window.cytoscapeFcose);
+    LAYOUT_NAME = "fcose";
+  }
+} catch (e) {
+  LAYOUT_NAME = "cose";
+}
+
+function layoutOptions(name) {
+  if (name === "fcose") {
+    return {
+      name: "fcose",
+      quality: "proof",
+      animate: false,
+      randomize: true,
+      fit: true,
+      padding: 55,
+      nodeRepulsion: 14000,
+      idealEdgeLength: 90,      // connected nodes (a grouping) stay close
+      edgeElasticity: 0.4,
+      nodeSeparation: 150,      // push everything else well apart
+      gravity: 0.18,
+      gravityRange: 4.0,
+      numIter: 2600,
+      packComponents: true,
+      tile: true,
+    };
+  }
+  return {
+    name: "cose",
+    animate: false,
+    fit: true,
+    padding: 45,
+    nodeRepulsion: 26000,
+    idealEdgeLength: 95,
+    gravity: 0.25,
+    componentSpacing: 140,
+  };
+}
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -74,7 +117,7 @@ function toElements(graph) {
         id: "e" + e.id,
         source: String(e.source),
         target: String(e.target),
-        w: Math.min(9, 1 + e.weight / 3),
+        w: Math.min(6, 0.8 + e.weight / 4),
       },
     });
   }
@@ -89,10 +132,13 @@ const CY_STYLE = [
       width: "data(size)",
       height: "data(size)",
       label: "data(label)",
-      color: "#dfe3e8",
-      "font-size": 11,
+      color: "#eef2f7",
+      // Prominent nodes get larger labels; small ones hide when zoomed out
+      // so the default view stays uncluttered.
+      "font-size": "mapData(size, 16, 72, 7, 19)",
+      "min-zoomed-font-size": 11,
       "text-outline-color": "#11151c",
-      "text-outline-width": 2,
+      "text-outline-width": 2.4,
       "text-valign": "bottom",
       "text-margin-y": 3,
     },
@@ -101,9 +147,10 @@ const CY_STYLE = [
     selector: "edge",
     style: {
       width: "data(w)",
-      "line-color": "#39455a",
+      "line-color": "#36425a",
       "curve-style": "haystack",
-      opacity: 0.5,
+      "haystack-radius": 0.5,
+      opacity: 0.32,
     },
   },
   { selector: "node:selected", style: { "border-width": 3, "border-color": "#fff" } },
@@ -112,24 +159,21 @@ const CY_STYLE = [
 
 function renderGraph(graph) {
   if (cy) cy.destroy();
-  cy = cytoscape({
-    container: $("cy"),
-    elements: toElements(graph),
-    style: CY_STYLE,
-    layout: {
-      name: "cose",
-      animate: false,
-      fit: true,
-      padding: 45,
-      nodeRepulsion: 24000,
-      idealEdgeLength: 95,
-      gravity: 0.3,
-      componentSpacing: 130,
-    },
-    minZoom: 0.08,
-    maxZoom: 3.5,
-    wheelSensitivity: 0.25,
-  });
+  const build = (layoutName) =>
+    cytoscape({
+      container: $("cy"),
+      elements: toElements(graph),
+      style: CY_STYLE,
+      layout: layoutOptions(layoutName),
+      minZoom: 0.08,
+      maxZoom: 3.5,
+      wheelSensitivity: 0.25,
+    });
+  try {
+    cy = build(LAYOUT_NAME);
+  } catch (e) {
+    cy = build("cose"); // fall back if the fcose extension is unavailable
+  }
   cy.on("tap", "node", (evt) => selectNode(evt.target.id()));
   cy.on("tap", (evt) => {
     if (evt.target === cy) clearSelection();
@@ -259,12 +303,36 @@ async function loadGraph(params) {
     (currentParams.focus ? ' · focus: "' + currentParams.focus + '"' : "");
 }
 
+function renderOverviewPanel(ov) {
+  const f = ov.funnel;
+  const s = ov.scrape;
+  const recency =
+    s.hours_since == null
+      ? "no data"
+      : s.within_24h
+      ? "within 24h"
+      : "over 24h ago";
+  const stat = (label, value) =>
+    '<div class="stat"><span class="label">' + label +
+    '</span><span class="value">' + value + "</span></div>";
+  $("overview").innerHTML =
+    stat("Corpus documents", f.documents.toLocaleString()) +
+    stat("Graph entities", f.nodes.toLocaleString()) +
+    stat("Relationships", f.edges.toLocaleString()) +
+    stat("Last scrape", recency) +
+    stat(
+      "Single-mention",
+      Math.round(ov.quality.singleton_pct) + "% of nodes"
+    );
+}
+
 async function refreshMeta() {
   try {
     const overview = await api("/api/overview");
     totalNodes = overview.funnel.nodes;
+    renderOverviewPanel(overview);
   } catch (e) {
-    /* leave totalNodes as-is */
+    $("overview").textContent = "unavailable";
   }
   try {
     const data = await api("/api/types");

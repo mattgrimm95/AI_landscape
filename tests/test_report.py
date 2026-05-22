@@ -60,6 +60,10 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(
             overview["quality"]["examples"][0], ("Hegseth", "Pete Hegseth")
         )
+        # Hegseth and Pete Hegseth have no edges -> isolated.
+        self.assertEqual(overview["quality"]["isolated"], 2)
+        mentions = dict(overview["distributions"]["mentions"])
+        self.assertEqual(sum(mentions.values()), 4)
 
     def test_render_overview_produces_readable_text(self):
         self._seed()
@@ -73,6 +77,7 @@ class ReportTest(unittest.TestCase):
             "PIPELINE FUNNEL",
             "SCRAPE STATUS",
             "ENTITY TYPES",
+            "DISTRIBUTIONS",
             "DATA QUALITY",
         ):
             self.assertIn(heading, text)

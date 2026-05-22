@@ -55,7 +55,7 @@ def api_graph(
     type: Optional[str] = None,
     min_mentions: int = 0,
     max_nodes: int = Query(70, ge=1, le=400),
-    min_weight: int = Query(5, ge=1),
+    min_weight: int = Query(8, ge=1),
 ):
     """Return a comprehensible subgraph as {nodes, edges}."""
     nodes, edges = _load_graph()

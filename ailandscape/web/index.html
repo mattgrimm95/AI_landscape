@@ -6,6 +6,9 @@
   <title>AI Landscape — Knowledge Graph</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/layout-base/layout-base.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cose-base/cose-base.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose/cytoscape-fcose.js"></script>
 </head>
 <body>
   <header id="topbar">
@@ -22,6 +25,11 @@
         <ul id="search-results"></ul>
       </section>
 
+      <section class="panel" id="overview-panel">
+        <h2>Overview</h2>
+        <div id="overview">loading…</div>
+      </section>
+
       <section class="panel">
         <h2>View</h2>
         <label>Entity type
@@ -31,7 +39,7 @@
           <input id="f-min-mentions" type="number" value="0" min="0" />
         </label>
         <label>Min edge weight
-          <input id="f-min-weight" type="number" value="5" min="1" />
+          <input id="f-min-weight" type="number" value="8" min="1" />
         </label>
         <label>Max nodes
           <input id="f-max-nodes" type="number" value="70" min="5" max="400" />
