@@ -61,10 +61,21 @@ class KnowledgeGraphStore:
         self.close()
 
     def clear(self):
-        """Remove all graph data. Used by `reconcile` to rebuild from the log."""
-        self.conn.executescript(
-            "DELETE FROM edges; DELETE FROM aliases; DELETE FROM nodes;"
-        )
+        """Remove all graph data. Used by `reconcile` to rebuild from the log.
+
+        Autoincrement counters are reset so a rebuild from the same raw log
+        produces the same node and edge ids every time.
+        """
+        self.conn.execute("DELETE FROM edges")
+        self.conn.execute("DELETE FROM aliases")
+        self.conn.execute("DELETE FROM nodes")
+        try:
+            self.conn.execute(
+                "DELETE FROM sqlite_sequence "
+                "WHERE name IN ('nodes', 'aliases', 'edges')"
+            )
+        except sqlite3.OperationalError:
+            pass  # sqlite_sequence does not exist until the first insert
         self.conn.commit()
 
     def insert_node(

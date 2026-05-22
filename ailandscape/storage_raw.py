@@ -56,6 +56,23 @@ class RawLogStore:
     def __exit__(self, *_exc):
         self.close()
 
+    def clear(self):
+        """Remove all rows so the log can be rebuilt from the corpus.
+
+        Autoincrement counters are reset too, so a rebuild from the same
+        corpus produces the same document and entity ids every time.
+        """
+        self.conn.execute("DELETE FROM entities")
+        self.conn.execute("DELETE FROM documents")
+        try:
+            self.conn.execute(
+                "DELETE FROM sqlite_sequence "
+                "WHERE name IN ('documents', 'entities')"
+            )
+        except sqlite3.OperationalError:
+            pass  # sqlite_sequence does not exist until the first insert
+        self.conn.commit()
+
     def add_document(self, article, content_hash):
         """Insert a document if it is new. Returns (document_id, is_new)."""
         row = self.conn.execute(
@@ -72,7 +89,7 @@ class RawLogStore:
                 article.get("url", ""),
                 article.get("title", ""),
                 article.get("published", ""),
-                _utcnow(),
+                article.get("fetched_at") or _utcnow(),
                 content_hash,
                 article.get("raw_text", ""),
             ),
@@ -81,8 +98,15 @@ class RawLogStore:
         return cur.lastrowid, True
 
     def add_entities(self, document_id, entities):
-        """Append raw entity records for a document."""
-        now = _utcnow()
+        """Append raw entity records for a document.
+
+        `extracted_at` is set to the document's fetch time rather than the
+        wall clock, so the raw log rebuilds identically from the corpus.
+        """
+        row = self.conn.execute(
+            "SELECT fetched_at FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+        extracted_at = row["fetched_at"] if row else _utcnow()
         self.conn.executemany(
             "INSERT INTO entities "
             "(document_id, text, label, start_char, end_char, extracted_at) "
@@ -94,7 +118,7 @@ class RawLogStore:
                     e["label"],
                     e.get("start"),
                     e.get("end"),
-                    now,
+                    extracted_at,
                 )
                 for e in entities
             ],

@@ -37,6 +37,16 @@ class RawLogStoreTest(unittest.TestCase):
         self.assertEqual(entities[0]["text"], "China")
         self.assertEqual(entities[1]["label"], "organization")
 
+    def test_clear_resets_the_log_and_ids(self):
+        doc_id, _ = self.store.add_document({"source": "S"}, "h")
+        self.store.add_entities(doc_id, [{"text": "X", "label": "misc"}])
+        self.store.clear()
+        self.assertEqual(self.store.count_documents(), 0)
+        self.assertEqual(self.store.count_entities(), 0)
+        # Ids restart from 1 after a clear, so a rebuild is reproducible.
+        new_id, _ = self.store.add_document({"source": "S"}, "h")
+        self.assertEqual(new_id, 1)
+
 
 class KnowledgeGraphStoreTest(unittest.TestCase):
     def setUp(self):

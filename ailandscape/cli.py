@@ -1,19 +1,25 @@
 """Command-line interface for the AI landscape pipeline.
 
 Usage:
-    python -m ailandscape.cli run        fetch live feeds and rebuild the graph
+    python -m ailandscape.cli run        scrape new documents, then rebuild
+    python -m ailandscape.cli rebuild    rebuild both databases from the corpus
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
-    python -m ailandscape.cli stats      show database statistics
+    python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli snapshot   export both databases to snapshots/
-    python -m ailandscape.cli reset --confirm   delete both databases
+    python -m ailandscape.cli reset --confirm   delete the derived databases
+
+The corpus (corpus/documents.jsonl) is the source of truth; `rebuild`
+regenerates the databases from it deterministically.
 """
 
 import argparse
 import datetime
 import json
+import os
 import sys
+import tempfile
 
-from . import config, pipeline, reconcile, scraper
+from . import config, corpus, pipeline, reconcile, scraper
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
 from .storage_raw import RawLogStore
@@ -36,6 +42,25 @@ def cmd_run(args):
     try:
         result = pipeline.run(
             feeds_mod.FEEDS,
+            config.CORPUS_FILE,
+            raw,
+            kg,
+            ner_backend=args.ner,
+            corrections=reconcile.load_corrections(CORRECTIONS_FILE),
+            log=_log,
+        )
+    finally:
+        raw.close()
+        kg.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_rebuild(args):
+    raw, kg = _open_stores()
+    try:
+        result = pipeline.rebuild(
+            config.CORPUS_FILE,
             raw,
             kg,
             ner_backend=args.ner,
@@ -50,23 +75,31 @@ def cmd_run(args):
 
 
 def cmd_demo(args):
-    raw, kg = _open_stores()
+    # The demo runs entirely in a throwaway directory so it never touches
+    # the real corpus or databases.
+    tmp = tempfile.mkdtemp(prefix="ailandscape-demo-")
+    corpus_path = os.path.join(tmp, "documents.jsonl")
+    for article in scraper.scrape_fixture(SAMPLE_FEED, "Sample Feed"):
+        corpus.append(corpus_path, pipeline.make_record(article))
+    raw = RawLogStore(os.path.join(tmp, "raw_log.db"))
+    kg = KnowledgeGraphStore(os.path.join(tmp, "knowledge_graph.db"))
     try:
-        articles = scraper.scrape_fixture(SAMPLE_FEED, "Sample Feed")
-        ingest = pipeline.ingest_articles(
-            articles, raw, ner_backend=args.ner, log=_log
-        )
-        graph = reconcile.reconcile(raw, kg, log=_log)
+        result = pipeline.rebuild(corpus_path, raw, kg, ner_backend=args.ner, log=_log)
     finally:
         raw.close()
         kg.close()
-    print(json.dumps({"fetched": len(articles), "ingest": ingest, "graph": graph}, indent=2))
+    print(json.dumps(result, indent=2))
+    print("demo ran in %s (real data untouched)" % tmp)
     return 0
 
 
 def cmd_stats(_args):
     raw, kg = _open_stores()
     try:
+        print(
+            "Corpus:   %d documents  (%s)"
+            % (corpus.count(config.CORPUS_FILE), config.CORPUS_FILE)
+        )
         print(
             "Raw log:  %d documents, %d entities"
             % (raw.count_documents(), raw.count_entities())
@@ -122,10 +155,12 @@ def cmd_snapshot(_args):
 
 
 def cmd_reset(args):
-    # Destructive: only proceeds when a human explicitly passes --confirm.
+    # Destructive, but only for the *derived* databases — the corpus (the
+    # source of truth) is never touched, and even this needs --confirm.
     if not args.confirm:
         print(
-            "reset deletes both databases. Re-run with --confirm to proceed.",
+            "reset deletes the derived databases (the corpus is preserved). "
+            "Re-run with --confirm to proceed.",
             file=sys.stderr,
         )
         return 1
@@ -133,6 +168,7 @@ def cmd_reset(args):
         if db_path.exists():
             db_path.unlink()
             print("deleted %s" % db_path)
+    print("corpus left intact; run 'rebuild' to regenerate the databases.")
     return 0
 
 
@@ -143,22 +179,32 @@ def build_parser():
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_p = sub.add_parser("run", help="fetch live feeds and rebuild the graph")
+    run_p = sub.add_parser(
+        "run", help="scrape new documents into the corpus, then rebuild"
+    )
     run_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
     run_p.set_defaults(func=cmd_run)
+
+    rebuild_p = sub.add_parser(
+        "rebuild", help="rebuild both databases from the corpus (no network)"
+    )
+    rebuild_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
+    rebuild_p.set_defaults(func=cmd_rebuild)
 
     demo_p = sub.add_parser("demo", help="run the flow on the bundled sample feed")
     demo_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
     demo_p.set_defaults(func=cmd_demo)
 
-    sub.add_parser("stats", help="show database statistics").set_defaults(
+    sub.add_parser("stats", help="show corpus and database statistics").set_defaults(
         func=cmd_stats
     )
     sub.add_parser(
         "snapshot", help="export both databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)
 
-    reset_p = sub.add_parser("reset", help="delete both databases (destructive)")
+    reset_p = sub.add_parser(
+        "reset", help="delete the derived databases (the corpus is kept)"
+    )
     reset_p.add_argument(
         "--confirm", action="store_true", help="required to actually delete"
     )

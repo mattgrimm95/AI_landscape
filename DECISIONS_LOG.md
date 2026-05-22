@@ -85,3 +85,38 @@ A high-level record of steps taken and decisions made while implementing the
   legitimate and correctly typed.
 - `snapshot` verified: both databases export to a single JSON file under
   `snapshots/` and round-trip cleanly.
+
+## 2026-05-21 — Source-of-truth refactor (reproducible databases)
+
+### Why
+- Question raised: would `data/*.db` really "regenerate the same"? It would
+  not — `run` fetches whatever the live feeds currently hold, and feed
+  contents roll over time. The graph was deterministic *given* the raw log,
+  but the raw log itself was not reproducible, and it was gitignored — so
+  losing it meant losing unrecoverable scraped history. The skills_plan
+  "version-controllable / revertible" requirement was therefore not met.
+
+### Change
+- Added a **corpus**: `corpus/documents.jsonl`, an append-only, one-object-
+  per-line file of scraped documents. It is **committed to git** and is the
+  single source of truth.
+- Both SQLite databases are now **derived caches**. `pipeline.rebuild`
+  regenerates them from the corpus; `data/` stays gitignored.
+- Determinism work so the same corpus always yields the same databases:
+  - `fetched_at` and `content_hash` are captured once at scrape time and
+    stored in the corpus (not regenerated on rebuild).
+  - entity `extracted_at` is derived from the document's `fetched_at`, not
+    the wall clock.
+  - `clear()` resets SQLite autoincrement counters, so document/node/edge
+    ids are reproducible across rebuilds.
+- New CLI verb `rebuild` regenerates the databases from the corpus with no
+  network. `run` = scrape-into-corpus + rebuild. `demo` now runs fully in a
+  throwaway directory. `reset` deletes only the derived databases and leaves
+  the corpus intact.
+
+### Verification
+- Live run: 81 documents into the corpus -> 1,786 nodes, 27,912 edges.
+- Reproducibility proven: SHA-256 of the knowledge graph and of the raw log
+  are byte-identical before and after a `rebuild` from the same corpus.
+- Test suite expanded to 31 tests, including corpus round-trip and a
+  rebuild-determinism check; all passing.
