@@ -25,7 +25,7 @@
 * Microservices
 * DevOps
 * Clear, human-readable code
-* Low computational complexity
+* Low computational complexity (specifically Big O notation)
 * Fast feedback loop
 * Get to MVP fast
 * Create high-level decision and change log
@@ -34,6 +34,10 @@
 * Code and graphics can run on an average gaming laptop.
 * Create a README at a high-level so someone could replicate the artifacts and output.
 * Never share secrets or API keys. Do not share secrets or API keys under any circumstnace.
+* Don't ever push .pem files to an online code base.
+* Add test that checks to make sure no secrets or API keys are exposed in code or committed for pushing.
+* Run tests often.
+* Create a TODO file to easily draft new commands while other commands are running. Add most recent to top. Mark done items with [done].
 
 ## Project Characteristics
 
