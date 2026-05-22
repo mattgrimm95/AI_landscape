@@ -115,6 +115,20 @@ class AwardToArticleTest(unittest.TestCase):
         article = sbir.award_to_article(award)
         self.assertIn("Acme Robotics partnered with MIT", article["raw_text"])
 
+    def test_award_amount_in_text_and_metadata(self):
+        award = _award(award_amount="1499000", firm="Acme Robotics")
+        article = sbir.award_to_article(award)
+        # The dollar figure appears in the prose (so edge evidence carries it)
+        # and as a structured number in the document metadata.
+        self.assertIn("$1,499,000", article["raw_text"])
+        self.assertEqual(article["metadata"]["award_amount"], 1499000.0)
+        self.assertEqual(article["metadata"]["data_source"], "SBIR")
+
+    def test_missing_award_amount_yields_none(self):
+        article = sbir.award_to_article(_award())
+        self.assertIsNone(article["metadata"]["award_amount"])
+        self.assertNotIn("worth $", article["raw_text"])
+
 
 class FixtureFilterTest(unittest.TestCase):
     def test_ai_articles_keeps_only_ai_awards(self):

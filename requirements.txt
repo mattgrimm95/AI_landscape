@@ -13,3 +13,8 @@ httpx>=0.27           # used by the API test client
 # rule-based backend is the default.
 #   pip install "spacy<3.8"   # spaCy 3.8+ requires Python 3.10+
 #   python -m spacy download en_core_web_sm
+
+# Optional: pypdf is needed by the J-Books data source (ailandscape/jbooks.py)
+# to extract text from DoD Justification Book PDFs. Without it the `jbooks`
+# command is a graceful no-op, like a throttled SBIR run.
+#   pip install pypdf

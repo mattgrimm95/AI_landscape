@@ -1,3 +1,4 @@
+import json
 import pathlib
 import tempfile
 import unittest
@@ -32,10 +33,38 @@ class ServerApiTest(unittest.TestCase):
         )
         kg.insert_alias(china, "china")
         kg.insert_alias(pentagon, "pentagon")
+        kg.insert_alias(pentagon, "dod")
         kg.insert_edge(china, pentagon, "co_occurs_with", 4)
+        kg.insert_edge(
+            pentagon, china, "awards_contract", 2,
+            metadata={"evidence": "the Pentagon awarded a major contract",
+                      "source": "hashA"},
+        )
+        kg.insert_node_documents(china, ["hashA", "hashB"])
+        kg.insert_node_documents(pentagon, ["hashA"])
         kg.commit()
         kg.close()
         NEROutputLog(config.NER_OUTPUT_DB).close()
+
+        config.CORPUS_FILE.write_text(
+            "\n".join(
+                json.dumps(d)
+                for d in [
+                    {"content_hash": "hashA", "title": "Doc A",
+                     "source": "Feed A", "url": "https://ex.test/a",
+                     "published": "2026-05-01",
+                     "fetched_at": "2026-05-01T00:00:00+00:00",
+                     "raw_text": "Body A about China and the Pentagon."},
+                    {"content_hash": "hashB", "title": "Doc B",
+                     "source": "Feed B", "url": "https://ex.test/b",
+                     "published": "2026-05-02",
+                     "fetched_at": "2026-05-02T00:00:00+00:00",
+                     "raw_text": "Body B about China."},
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         self.client = TestClient(server.app)
 
@@ -53,12 +82,38 @@ class ServerApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(len(body["nodes"]), 2)
-        self.assertEqual(len(body["edges"]), 1)
+        # One co-occurrence edge plus one typed edge between the two nodes.
+        self.assertEqual(len(body["edges"]), 2)
+
+    def test_typed_edge_carries_evidence(self):
+        edges = self.client.get("/api/graph?min_weight=1").json()["edges"]
+        typed = [e for e in edges if e["relation"] == "awards_contract"]
+        self.assertEqual(len(typed), 1)
+        self.assertIn("awarded", typed[0]["evidence"])
+        # Co-occurrence edges carry no evidence.
+        cooc = [e for e in edges if e["relation"] == "co_occurs_with"]
+        self.assertEqual(cooc[0]["evidence"], "")
+
+    def test_edges_carry_strength(self):
+        edges = self.client.get("/api/graph?min_weight=1").json()["edges"]
+        typed = [e for e in edges if e["relation"] == "awards_contract"][0]
+        self.assertEqual(typed["strength"], 1.0)
+        cooc = [e for e in edges if e["relation"] == "co_occurs_with"][0]
+        self.assertIn("strength", cooc)
 
     def test_search_endpoint(self):
         resp = self.client.get("/api/search?q=chi")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("China", [n["label"] for n in resp.json()["results"]])
+        self.assertIn("China", [n["label"] for n in resp.json()["entities"]])
+
+    def test_search_matches_aliases(self):
+        # "dod" is an alias of Pentagon but not a substring of its name.
+        body = self.client.get("/api/search?q=dod").json()
+        self.assertIn("Pentagon", [n["label"] for n in body["entities"]])
+
+    def test_search_finds_documents_by_title(self):
+        body = self.client.get("/api/search?q=Doc A").json()
+        self.assertIn("Doc A", [d["title"] for d in body["documents"]])
 
     def test_node_and_neighbors(self):
         graph = self.client.get("/api/graph?min_weight=1").json()
@@ -71,6 +126,35 @@ class ServerApiTest(unittest.TestCase):
 
     def test_node_not_found(self):
         self.assertEqual(self.client.get("/api/node/999999").status_code, 404)
+
+    def test_node_documents_endpoint(self):
+        graph = self.client.get("/api/graph?min_weight=1").json()
+        china_id = next(n["id"] for n in graph["nodes"] if n["label"] == "China")
+        body = self.client.get("/api/node/%d/documents" % china_id).json()
+        self.assertEqual(body["total"], 2)
+        self.assertEqual({d["title"] for d in body["documents"]},
+                         {"Doc A", "Doc B"})
+        # Most-recent-first by fetched_at.
+        self.assertEqual(body["documents"][0]["title"], "Doc B")
+        # The endpoint also returns a per-month activity timeline.
+        self.assertIn("timeline", body)
+
+    def test_trends_endpoint(self):
+        body = self.client.get("/api/trends").json()
+        self.assertIn("document_volume", body)
+        self.assertIn("new_entities", body)
+        self.assertIn("recent_entities", body)
+
+    def test_path_endpoint_finds_connection(self):
+        res = self.client.get("/api/path?from=China&to=Pentagon").json()
+        self.assertTrue(res["found"])
+        self.assertEqual(res["from"]["label"], "China")
+        self.assertEqual(res["to"]["label"], "Pentagon")
+        self.assertEqual(len(res["nodes"]), len(res["edges"]) + 1)
+
+    def test_path_endpoint_unknown_entity_404(self):
+        resp = self.client.get("/api/path?from=Nonexistent&to=China")
+        self.assertEqual(resp.status_code, 404)
 
     def test_types_endpoint(self):
         types = {t["type"]: t["count"] for t in self.client.get("/api/types").json()["types"]}

@@ -63,6 +63,7 @@ out/
 
 # --- Claude Code local config ---
 .claude/settings.local.json
+.claude/launch.json
 
 # --- AI_landscape runtime data (regenerable from the raw log) ---
 data/

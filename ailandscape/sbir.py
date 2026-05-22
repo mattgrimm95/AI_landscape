@@ -151,6 +151,21 @@ def _clean(value):
     return " ".join(str(value or "").split())
 
 
+def _parse_amount(value):
+    """Parse an SBIR award amount into a float of dollars, or None.
+
+    The API reports amounts as strings that may carry "$", commas, or be
+    absent entirely, so anything but digits and a decimal point is stripped.
+    """
+    cleaned = re.sub(r"[^\d.]", "", str(value or ""))
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def _award_url(award, firm, title):
     """A stable, unique URL for an award (used for de-duplication)."""
     link = _clean(award.get("award_link"))
@@ -181,11 +196,18 @@ def award_to_article(award):
     abstract = _clean(award.get("abstract"))
     ri_name = _clean(award.get("ri_name"))
     pi_name = _clean(award.get("pi_name"))
+    amount = _parse_amount(award.get("award_amount"))
 
     contract_desc = " ".join(p for p in (program, phase, "contract") if p)
     sentences = []
     if firm:
-        sentences.append("%s awarded %s a %s." % (funder, firm, contract_desc))
+        # The dollar figure goes into the lead sentence so it is captured in
+        # the awards_contract edge's evidence snippet — the graph then shows
+        # where the money went, not just that a contract was awarded.
+        award_sentence = "%s awarded %s a %s" % (funder, firm, contract_desc)
+        if amount:
+            award_sentence += " worth $%s" % format(int(amount), ",d")
+        sentences.append(award_sentence + ".")
     if firm and ri_name:
         sentences.append(
             "%s partnered with %s on the project." % (firm, ri_name)
@@ -206,6 +228,16 @@ def award_to_article(award):
             or _clean(award.get("award_year"))
         ),
         "raw_text": raw_text,
+        # Structured award fields kept alongside the document so funding can
+        # be totalled and filtered without re-parsing the prose.
+        "metadata": {
+            "data_source": "SBIR",
+            "award_amount": amount,
+            "phase": phase,
+            "branch": branch,
+            "program": program,
+            "award_year": _clean(award.get("award_year")),
+        },
     }
 
 

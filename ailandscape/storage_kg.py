@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS edges (
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_id);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_id);
+CREATE TABLE IF NOT EXISTS node_documents (
+    node_id       INTEGER NOT NULL REFERENCES nodes(id),
+    content_hash  TEXT NOT NULL,
+    UNIQUE(node_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_node_docs_node ON node_documents(node_id);
 """
 
 
@@ -67,6 +73,7 @@ class KnowledgeGraphStore:
         produces the same node and edge ids every time.
         """
         self.conn.execute("DELETE FROM edges")
+        self.conn.execute("DELETE FROM node_documents")
         self.conn.execute("DELETE FROM aliases")
         self.conn.execute("DELETE FROM nodes")
         try:
@@ -116,6 +123,25 @@ class KnowledgeGraphStore:
             "VALUES (?, ?, ?, ?, ?)",
             (src_id, dst_id, relation, weight, json.dumps(metadata or {})),
         )
+
+    def insert_node_documents(self, node_id, content_hashes):
+        """Record which corpus documents a node was mentioned in."""
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO node_documents (node_id, content_hash) "
+            "VALUES (?, ?)",
+            [(node_id, h) for h in content_hashes],
+        )
+
+    def documents_for_node(self, node_id):
+        """Return the content hashes of the documents a node appears in."""
+        return [
+            r["content_hash"]
+            for r in self.conn.execute(
+                "SELECT content_hash FROM node_documents WHERE node_id = ? "
+                "ORDER BY content_hash",
+                (node_id,),
+            )
+        ]
 
     def commit(self):
         self.conn.commit()

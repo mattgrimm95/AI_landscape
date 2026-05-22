@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -99,6 +100,42 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(china["mention_count"], 2)
         self.assertEqual(china["document_count"], 2)
 
+    def test_node_documents_are_persisted(self):
+        self._seed()
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        china = self.kg.node_by_alias("china")
+        # China is mentioned in both h1 and h2; Taiwan only in h2.
+        self.assertEqual(
+            set(self.kg.documents_for_node(china["id"])), {"h1", "h2"}
+        )
+        taiwan = self.kg.node_by_alias("taiwan")
+        self.assertEqual(self.kg.documents_for_node(taiwan["id"]), ["h2"])
+
+    def test_co_occurrence_edge_carries_strength(self):
+        self._seed()
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        cooc = [
+            e for e in self.kg.edges() if e["relation"] == "co_occurs_with"
+        ]
+        self.assertTrue(cooc)
+        strength = json.loads(cooc[0]["metadata"])["strength"]
+        self.assertGreater(strength, 0)
+        self.assertLessEqual(strength, 1.0)
+
+    def test_node_dates_use_published_not_fetched(self):
+        # The document was fetched in May 2026 but published in Jan 2024;
+        # the node's first/last seen must reflect when the news happened.
+        self.documents.append({
+            "content_hash": "h1",
+            "fetched_at": "2026-05-21T00:00:00+00:00",
+            "published": "Wed, 10 Jan 2024 12:00:00 +0000",
+        })
+        self.ner.add_entities("h1", [{"text": "China", "label": "place"}])
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        china = self.kg.node_by_alias("china")
+        self.assertEqual(china["first_seen"], "2024-01-10")
+        self.assertEqual(china["last_seen"], "2024-01-10")
+
     def test_rebuild_is_idempotent(self):
         self._seed()
         reconcile.reconcile(self.documents, self.ner, self.kg)
@@ -173,6 +210,51 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(node["mention_count"], 2)
         self.assertEqual(node["document_count"], 2)
 
+    def test_typed_edge_stores_confidence_from_weight(self):
+        text = "Lockheed Martin builds the F-35 fighter."
+        offset = 2
+        self.documents.append({
+            "content_hash": "h1",
+            "fetched_at": "2026-05-21T00:00:00+00:00",
+            "title": "",
+            "raw_text": text,
+        })
+        self.ner.add_entities("h1", [
+            {"text": "Lockheed Martin", "label": "organization",
+             "start": offset + 0, "end": offset + 15},
+            {"text": "F-35", "label": "product",
+             "start": offset + 27, "end": offset + 31},
+        ])
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        typed = [e for e in self.kg.edges() if e["relation"] == "develops"][0]
+        meta = json.loads(typed["metadata"])
+        # Confidence rises with weight: 1 occurrence -> 0.5.
+        self.assertEqual(meta["confidence"], 0.5)
+
+    def test_typed_edge_stores_evidence(self):
+        text = "Lockheed Martin builds the F-35 fighter."
+        # corpus.document_text prepends ". " to raw_text, so entity offsets
+        # are shifted by two characters.
+        offset = 2
+        self.documents.append({
+            "content_hash": "h1",
+            "fetched_at": "2026-05-21T00:00:00+00:00",
+            "title": "",
+            "raw_text": text,
+        })
+        self.ner.add_entities("h1", [
+            {"text": "Lockheed Martin", "label": "organization",
+             "start": offset + 0, "end": offset + 15},
+            {"text": "F-35", "label": "product",
+             "start": offset + 27, "end": offset + 31},
+        ])
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        typed = [e for e in self.kg.edges() if e["relation"] == "develops"]
+        self.assertEqual(len(typed), 1)
+        meta = json.loads(typed[0]["metadata"])
+        self.assertIn("Lockheed Martin builds the F-35", meta["evidence"])
+        self.assertEqual(meta["source"], "h1")
+
     def test_coreference_leaves_ambiguous_surnames_alone(self):
         self._add_doc(
             "h1",
@@ -184,6 +266,31 @@ class ReconcileTest(unittest.TestCase):
         self._add_doc("h2", [{"text": "Hegseth", "label": "person"}])
         summary = reconcile.reconcile(self.documents, self.ner, self.kg)
         # Two people share the surname, so bare "Hegseth" stays its own node.
+        self.assertEqual(summary["nodes"], 3)
+
+    def test_organization_coreference_merges_partial_name(self):
+        self._add_doc(
+            "h1", [{"text": "Lockheed Martin", "label": "organization"}]
+        )
+        self._add_doc("h2", [{"text": "Lockheed", "label": "organization"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # "Lockheed" folds into "Lockheed Martin" on the shared first word.
+        self.assertEqual(summary["nodes"], 1)
+        node = self.kg.node_by_alias("lockheed")
+        self.assertEqual(node["canonical_name"], "Lockheed Martin")
+        self.assertEqual(node["mention_count"], 2)
+
+    def test_org_coreference_leaves_ambiguous_first_word_alone(self):
+        self._add_doc(
+            "h1",
+            [
+                {"text": "General Dynamics", "label": "organization"},
+                {"text": "General Atomics", "label": "organization"},
+            ],
+        )
+        self._add_doc("h2", [{"text": "General", "label": "organization"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # Two orgs share the first word, so bare "General" stays its own node.
         self.assertEqual(summary["nodes"], 3)
 
 

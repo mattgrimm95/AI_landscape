@@ -7,6 +7,11 @@ def _ent(text, label, start, end):
     return {"text": text, "label": label, "start": start, "end": end}
 
 
+def _triples(rels):
+    """Drop the evidence snippet, leaving (subject, relation, object)."""
+    return [r[:3] for r in rels]
+
+
 class RelationsTest(unittest.TestCase):
     def test_develops_relation(self):
         text = "Lockheed Martin builds the F-35 fighter."
@@ -17,7 +22,7 @@ class RelationsTest(unittest.TestCase):
                 _ent("F-35", "product", 27, 31),
             ],
         )
-        self.assertIn(("Lockheed Martin", "develops", "F-35"), rels)
+        self.assertIn(("Lockheed Martin", "develops", "F-35"), _triples(rels))
 
     def test_awards_contract_relation(self):
         text = "The Pentagon awarded Anduril a major contract."
@@ -28,7 +33,24 @@ class RelationsTest(unittest.TestCase):
                 _ent("Anduril", "organization", 21, 28),
             ],
         )
-        self.assertIn(("Pentagon", "awards_contract", "Anduril"), rels)
+        self.assertIn(("Pentagon", "awards_contract", "Anduril"), _triples(rels))
+
+    def test_relation_carries_evidence_snippet(self):
+        # Every typed relation carries the source text it was read from.
+        text = "Lockheed Martin builds the F-35 fighter."
+        rels = relations.extract_relations(
+            text,
+            [
+                _ent("Lockheed Martin", "organization", 0, 15),
+                _ent("F-35", "product", 27, 31),
+            ],
+        )
+        self.assertEqual(len(rels), 1)
+        subj, relation, obj, evidence = rels[0]
+        self.assertEqual(
+            (subj, relation, obj), ("Lockheed Martin", "develops", "F-35")
+        )
+        self.assertIn("Lockheed Martin builds the F-35", evidence)
 
     def test_type_constraint_rejects_bad_subject(self):
         # "develops" requires an organization subject — a place is rejected.
@@ -54,7 +76,7 @@ class RelationsTest(unittest.TestCase):
         self.assertEqual(rels, [])
 
     def test_distant_entities_are_not_related(self):
-        text = "Pentagon " + ("x" * 70) + " awarded Anduril."
+        text = "Pentagon " + ("x" * 100) + " awarded Anduril."
         anduril_at = text.index("Anduril")
         rels = relations.extract_relations(
             text,
@@ -84,7 +106,7 @@ class RelationsTest(unittest.TestCase):
                  "start_char": 21, "end_char": 28},
             ],
         )
-        self.assertIn(("Pentagon", "awards_contract", "Anduril"), rels)
+        self.assertIn(("Pentagon", "awards_contract", "Anduril"), _triples(rels))
 
     def test_passive_voice_flips_direction(self):
         # "X was awarded ... by Y" means Y is the awarding subject.
@@ -97,8 +119,10 @@ class RelationsTest(unittest.TestCase):
                 _ent("Pentagon", "organization", pentagon_at, pentagon_at + 8),
             ],
         )
-        self.assertIn(("Pentagon", "awards_contract", "Anduril"), rels)
-        self.assertNotIn(("Anduril", "awards_contract", "Pentagon"), rels)
+        self.assertIn(("Pentagon", "awards_contract", "Anduril"), _triples(rels))
+        self.assertNotIn(
+            ("Anduril", "awards_contract", "Pentagon"), _triples(rels)
+        )
 
     def test_passive_develops_flips_direction(self):
         text = "The F-35 was built by Lockheed Martin."
@@ -111,7 +135,7 @@ class RelationsTest(unittest.TestCase):
                      lockheed_at, lockheed_at + 15),
             ],
         )
-        self.assertIn(("Lockheed Martin", "develops", "F-35"), rels)
+        self.assertIn(("Lockheed Martin", "develops", "F-35"), _triples(rels))
 
     def test_located_in_relation(self):
         text = "Anduril is headquartered in California."
@@ -123,7 +147,7 @@ class RelationsTest(unittest.TestCase):
                 _ent("California", "place", california_at, california_at + 10),
             ],
         )
-        self.assertIn(("Anduril", "located_in", "California"), rels)
+        self.assertIn(("Anduril", "located_in", "California"), _triples(rels))
 
 
 if __name__ == "__main__":

@@ -70,5 +70,53 @@ class PipelineTest(unittest.TestCase):
             kg.close()
 
 
+class BackfillTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.corpus_path = os.path.join(self.tmp, "documents.jsonl")
+        self._orig_extract = scraper.extract_article
+        self._orig_sleep = pipeline.time.sleep
+        pipeline.time.sleep = lambda _s: None
+        self.addCleanup(
+            lambda: setattr(scraper, "extract_article", self._orig_extract)
+        )
+        self.addCleanup(
+            lambda: setattr(pipeline.time, "sleep", self._orig_sleep)
+        )
+
+    def test_short_doc_repaired_long_doc_untouched(self):
+        long_text = "Full article body sentence. " * 60
+        corpus.append(self.corpus_path, {
+            "url": "https://example.test/short", "title": "Short",
+            "content_hash": "h1", "raw_text": "teaser only",
+        })
+        corpus.append(self.corpus_path, {
+            "url": "https://example.test/long", "title": "Long",
+            "content_hash": "h2", "raw_text": long_text,
+        })
+        scraper.extract_article = lambda url, fallback="": (
+            long_text if url.endswith("/short") else fallback
+        )
+        result = pipeline.backfill_corpus_text(self.corpus_path)
+        self.assertEqual(result["scanned"], 2)
+        self.assertEqual(result["repaired"], 1)
+        docs = {d["content_hash"]: d for d in corpus.load(self.corpus_path)}
+        self.assertIn("Full article body", docs["h1"]["raw_text"])
+        self.assertEqual(docs["h2"]["raw_text"], long_text)
+
+    def test_failed_refetch_leaves_corpus_unchanged(self):
+        corpus.append(self.corpus_path, {
+            "url": "https://example.test/short", "title": "Short",
+            "content_hash": "h1", "raw_text": "teaser only",
+        })
+        # A failed re-fetch returns the short fallback unchanged.
+        scraper.extract_article = lambda url, fallback="": fallback
+        result = pipeline.backfill_corpus_text(self.corpus_path)
+        self.assertEqual(result["repaired"], 0)
+        self.assertEqual(
+            corpus.load(self.corpus_path)[0]["raw_text"], "teaser only"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

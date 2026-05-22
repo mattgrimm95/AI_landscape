@@ -18,6 +18,15 @@ KG_DB = DATA_DIR / "knowledge_graph.db"
 # reconcile, so corrections survive and reconstruction stays deterministic.
 CORRECTIONS_FILE = ROOT / "corrections.json"
 
+# Accumulating store of automated quality-review findings (merge candidates,
+# data-quality history). Version-controlled and never overwritten by the
+# `review` routine — each run merges new findings in.
+REVIEW_FILE = ROOT / "review.json"
+
+# Private recipient list for the daily email digest — lives under the
+# gitignored data/ directory so addresses are never pushed.
+EMAIL_RECIPIENTS_FILE = DATA_DIR / "email_recipients.txt"
+
 # Append-only log of pipeline runs (timing + counts), used by the overview
 # report. Derived data — lives under the gitignored data/ directory.
 RUN_HISTORY_FILE = DATA_DIR / "run_history.jsonl"

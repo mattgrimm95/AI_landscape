@@ -7,7 +7,9 @@ between them — e.g. "Lockheed Martin builds the F-35" -> develops.
 The rules are deliberately conservative — a short gap between the entities,
 no sentence boundary in the gap, and entity types that fit the relation — so
 it extracts fewer, more trustworthy relationships rather than many wrong
-ones. Each relationship is directed: (subject, relation, object).
+ones. Each relationship is directed and carries an evidence snippet:
+(subject, relation, object, evidence) — the snippet is the sentence text the
+relation was read from, so every typed edge can be traced to its wording.
 
 Passive voice is detected and the direction flipped, so "Anduril was awarded
 a contract by the Pentagon" yields (Pentagon, awards_contract, Anduril) — the
@@ -17,7 +19,9 @@ same triple as the active "the Pentagon awarded Anduril a contract".
 import re
 
 # Maximum characters allowed between the two entities for a relation to count.
-_MAX_GAP = 55
+# A moderately wide window catches more genuine relations; the per-edge
+# `confidence` then lets consumers filter on quality if needed.
+_MAX_GAP = 80
 
 # A sentence boundary inside the gap means the entities are not really related.
 _SENTENCE_BREAK = re.compile(r"[.!?]\s")
@@ -58,12 +62,22 @@ _PATTERNS = [
 RELATION_TYPES = tuple(rel for _re, rel, _s, _o in _PATTERNS)
 
 
+def _evidence(text, start, end):
+    """A short, readable snippet covering one relation — from the first
+    entity to a little past the second, trimmed at the next sentence break."""
+    tail = text[end:end + 60]
+    boundary = _SENTENCE_BREAK.search(tail)
+    stop = end + (boundary.end() if boundary else len(tail))
+    return " ".join(text[start:stop].split())[:240]
+
+
 def extract_relations(text, entities):
     """Extract typed relationships from one document.
 
     `text` is the document text the entity offsets refer to; `entities` are
     NER records with `text`, `label`, `start`/`start_char`, `end`/`end_char`.
-    Returns a list of (subject_text, relation, object_text) tuples.
+    Returns a list of (subject_text, relation, object_text, evidence) tuples;
+    `evidence` is the snippet of source text the relation was read from.
     """
     located = []
     for ent in entities:
@@ -74,8 +88,8 @@ def extract_relations(text, entities):
     located.sort(key=lambda item: item[0])
 
     relations = []
-    for i, (_s1, end1, e1) in enumerate(located):
-        for start2, _e2_end, e2 in located[i + 1:]:
+    for i, (start1, end1, e1) in enumerate(located):
+        for start2, end2, e2 in located[i + 1:]:
             if start2 <= end1:
                 continue  # overlapping entities
             if start2 - end1 > _MAX_GAP:
@@ -95,6 +109,9 @@ def extract_relations(text, entities):
                     continue
                 if obj_types and obj["label"] not in obj_types:
                     continue
-                relations.append((subj["text"], relation, obj["text"]))
+                relations.append(
+                    (subj["text"], relation, obj["text"],
+                     _evidence(text, start1, end2))
+                )
                 break
     return relations

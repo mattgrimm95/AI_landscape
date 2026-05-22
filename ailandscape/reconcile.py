@@ -90,29 +90,47 @@ def load_corrections(path):
 
 
 def _coreference(nodes):
-    """Detect person coreference merges (source key -> target key).
+    """Detect partial-name coreference merges (source key -> target key).
 
-    A one-word person name that is the last word of exactly *one* multi-word
-    person node merges into it — e.g. "Hegseth" -> "Pete Hegseth". The merge
-    is made only when there is a single candidate, so two different people
-    who share a surname are never conflated.
+    Two conservative rules, each firing only when there is a *single*
+    candidate, so distinct entities are never conflated:
+      * person       — a one-word name folds into the unique multi-word
+                       person whose surname (last word) it matches:
+                       "Hegseth" -> "Pete Hegseth".
+      * organization — a one-word name folds into the unique multi-word
+                       organization whose first word it matches:
+                       "Lockheed" -> "Lockheed Martin". An organization's
+                       distinctive token is its first word, not (as for a
+                       person) its last. Tokens shorter than four characters
+                       are skipped to avoid fuzzy acronym merges.
+
+    Sources are always single-word and targets always multi-word, so the
+    merges never chain.
     """
-    by_last_name = {}      # surname (lower) -> list of multi-word person keys
+    person_by_last = {}    # surname (lower) -> multi-word person keys
+    org_by_first = {}      # first word (lower) -> multi-word organization keys
     single_persons = []    # (key, lowercased single token)
+    single_orgs = []
     for key, node in nodes.items():
-        if node["type"] != "person":
-            continue
         words = node["canonical"].split()
-        if len(words) >= 2:
-            by_last_name.setdefault(words[-1].lower(), []).append(key)
-        elif len(words) == 1:
-            single_persons.append((key, words[0].lower()))
+        if node["type"] == "person":
+            if len(words) >= 2:
+                person_by_last.setdefault(words[-1].lower(), []).append(key)
+            elif len(words) == 1:
+                single_persons.append((key, words[0].lower()))
+        elif node["type"] == "organization":
+            if len(words) >= 2:
+                org_by_first.setdefault(words[0].lower(), []).append(key)
+            elif len(words) == 1 and len(words[0]) >= 4:
+                single_orgs.append((key, words[0].lower()))
 
     merge_into = {}
-    for key, token in single_persons:
-        candidates = by_last_name.get(token, [])
-        if len(candidates) == 1 and candidates[0] != key:
-            merge_into[key] = candidates[0]
+    for single, index in ((single_persons, person_by_last),
+                          (single_orgs, org_by_first)):
+        for key, token in single:
+            candidates = index.get(token, [])
+            if len(candidates) == 1 and candidates[0] != key:
+                merge_into[key] = candidates[0]
     return merge_into
 
 
@@ -178,7 +196,11 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         return key, canonical, entity["label"], alias
 
     for doc in documents:
-        doc_date = doc.get("fetched_at") or ""
+        # Date a node by when the news was published, not when it was
+        # scraped; fall back to the fetch date if no published date parses.
+        doc_date = (
+            corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
+        )
         doc_keys = set()
         for entity in doc_entities[doc["content_hash"]]:
             resolved = resolve(entity)
@@ -210,11 +232,15 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         if 2 <= len(doc_keys) <= _MAX_EDGE_ENTITIES:
             for pair in itertools.combinations(sorted(doc_keys), 2):
                 edges[pair] = edges.get(pair, 0) + 1
-        # Typed relationships from cue phrases between nearby entities.
-        for subj, relation, obj in relations.extract_relations(
+        # Typed relationships from cue phrases between nearby entities, each
+        # carrying the evidence snippet and the document it was read from.
+        for subj, relation, obj, evidence in relations.extract_relations(
             corpus.document_text(doc), doc_entities[doc["content_hash"]]
         ):
-            raw_relations.append((normalize(subj), relation, normalize(obj)))
+            raw_relations.append(
+                (normalize(subj), relation, normalize(obj),
+                 evidence, doc["content_hash"])
+            )
 
     # Step 4b: coreference — fold partial names into their fuller node, then
     # re-point that node's edges (dropping the resulting self-loops).
@@ -245,9 +271,10 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         log("coreference: merged %d partial-name nodes" % len(merge_into))
 
     # Resolve extracted relations to node keys (after coreference merges) and
-    # tally repeated relationships into directed, weighted typed edges.
+    # tally repeated relationships into directed, weighted typed edges. The
+    # first evidence snippet seen for a triple is kept as its provenance.
     typed_edges = {}
-    for norm_subj, relation, norm_obj in raw_relations:
+    for norm_subj, relation, norm_obj, evidence, chash in raw_relations:
         src = alias_index.get(norm_subj)
         dst = alias_index.get(norm_obj)
         if src is None or dst is None:
@@ -257,7 +284,13 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         if src == dst or src not in nodes or dst not in nodes:
             continue
         triple = (src, relation, dst)
-        typed_edges[triple] = typed_edges.get(triple, 0) + 1
+        edge = typed_edges.get(triple)
+        if edge is None:
+            typed_edges[triple] = {
+                "weight": 1, "evidence": evidence, "source": chash
+            }
+        else:
+            edge["weight"] += 1
 
     kg_store.clear()
     key_to_id = {}
@@ -272,13 +305,37 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         )
         for alias in sorted(node["aliases"]):
             kg_store.insert_alias(key_to_id[key], alias)
+        kg_store.insert_node_documents(key_to_id[key], sorted(node["docs"]))
     for (key_a, key_b), weight in sorted(edges.items()):
+        # A normalized, hub-corrected strength: the Jaccard overlap of the two
+        # entities' document sets. Raw weight makes every link to a mega-hub
+        # look strong; strength stays low unless the two entities genuinely
+        # travel together.
+        docs_a = len(nodes[key_a]["docs"])
+        docs_b = len(nodes[key_b]["docs"])
+        union = docs_a + docs_b - weight
+        strength = round(weight / union, 4) if union > 0 else 0.0
         kg_store.insert_edge(
-            key_to_id[key_a], key_to_id[key_b], "co_occurs_with", weight
+            key_to_id[key_a],
+            key_to_id[key_b],
+            "co_occurs_with",
+            weight,
+            metadata={"strength": strength},
         )
-    for (src_key, relation, dst_key), weight in sorted(typed_edges.items()):
+    for (src_key, relation, dst_key), info in sorted(typed_edges.items()):
+        # Confidence rises with the number of independent occurrences:
+        # weight 1 -> 0.5, 2 -> 0.667, 5 -> 0.833, 10 -> 0.909.
+        confidence = round(1.0 - 1.0 / (1 + info["weight"]), 3)
         kg_store.insert_edge(
-            key_to_id[src_key], key_to_id[dst_key], relation, weight
+            key_to_id[src_key],
+            key_to_id[dst_key],
+            relation,
+            info["weight"],
+            metadata={
+                "evidence": info["evidence"],
+                "source": info["source"],
+                "confidence": confidence,
+            },
         )
     kg_store.commit()
 

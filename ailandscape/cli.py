@@ -4,9 +4,15 @@ Usage:
     python -m ailandscape.cli run        scrape new documents, then rebuild
     python -m ailandscape.cli rebuild    rebuild the NER log + graph from the corpus
     python -m ailandscape.cli sbir       pull AI-related SBIR/STTR awards, then rebuild
+    python -m ailandscape.cli jbooks     pull AI-related R&D items from DoD J-Books, then rebuild
+    python -m ailandscape.cli backfill   re-fetch corpus documents that stored only a summary
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli overview   print a statistical overview of the data
+    python -m ailandscape.cli briefing   print a generated briefing of the landscape
+    python -m ailandscape.cli trends     print temporal trends (volume, new/active entities)
+    python -m ailandscape.cli review     audit data quality and accumulate findings in review.json
+    python -m ailandscape.cli digest     email the daily digest (opt-in; needs SMTP env vars + recipients)
     python -m ailandscape.cli visualize  render a static interactive HTML graph
     python -m ailandscape.cli serve       run the interactive web app (browser)
     python -m ailandscape.cli correct merge "DoD" "Department of Defense"
@@ -24,7 +30,10 @@ import os
 import sys
 import tempfile
 
-from . import config, corpus, pipeline, reconcile, report, scraper, visualize
+from . import (
+    briefing, config, corpus, emailer, pipeline, reconcile, report, review,
+    scraper, synthesis, trends, visualize,
+)
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -51,6 +60,7 @@ def cmd_run(args):
             ner_log,
             kg,
             sbir_queries=feeds_mod.SBIR_QUERIES,
+            jbook_sources=feeds_mod.JBOOK_SOURCES,
             ner_backend=args.ner,
             corrections=reconcile.load_corrections(CORRECTIONS_FILE),
             log=_log,
@@ -58,6 +68,33 @@ def cmd_run(args):
     finally:
         ner_log.close()
         kg.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_jbooks(args):
+    """Pull AI-related R&D items from DoD J-Books into the corpus, rebuild."""
+    config.ensure_dirs()
+    result = pipeline.scrape_jbooks_into_corpus(
+        feeds_mod.JBOOK_SOURCES, config.CORPUS_FILE, log=_log
+    )
+    if result["jbooks_added"]:
+        ner_log, kg = _open_stores()
+        try:
+            rebuilt = pipeline.rebuild(
+                config.CORPUS_FILE,
+                ner_log,
+                kg,
+                ner_backend=args.ner,
+                corrections=reconcile.load_corrections(CORRECTIONS_FILE),
+                log=_log,
+            )
+        finally:
+            ner_log.close()
+            kg.close()
+        result["graph"] = rebuilt["graph"]
+    else:
+        _log("no new J-Book items added — the graph is unchanged.")
     print(json.dumps(result, indent=2))
     return 0
 
@@ -86,6 +123,16 @@ def cmd_sbir(args):
     else:
         _log("no new SBIR awards added — the graph is unchanged.")
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_backfill(_args):
+    """Re-fetch corpus documents that stored only a short feed summary."""
+    config.ensure_dirs()
+    result = pipeline.backfill_corpus_text(config.CORPUS_FILE, log=_log)
+    print(json.dumps(result, indent=2))
+    if result["repaired"]:
+        print("run 'rebuild' to regenerate the databases with the repaired text.")
     return 0
 
 
@@ -173,6 +220,82 @@ def cmd_overview(_args):
     return 0
 
 
+def cmd_briefing(args):
+    """Print a generated briefing of the AI national-security landscape."""
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        documents = corpus.load(config.CORPUS_FILE)
+        data = briefing.build_briefing(documents, kg, days=args.days)
+    finally:
+        kg.close()
+    print(briefing.render_briefing(data))
+    if args.narrative:
+        if not synthesis.is_configured():
+            print(
+                "\n[narrative synthesis is opt-in: set ANTHROPIC_API_KEY "
+                "to enable it]"
+            )
+        else:
+            try:
+                narrative = synthesis.summarize_briefing(data)
+                print("\nANALYST NARRATIVE\n" + "-" * 62 + "\n" + narrative)
+            except synthesis.SynthesisError as exc:
+                print("\n[narrative synthesis failed: %s]" % exc)
+    return 0
+
+
+def cmd_digest(args):
+    """Compose the daily digest; with --preview, print it; otherwise send it
+    to the recipients in data/email_recipients.txt via configured SMTP."""
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        documents = corpus.load(config.CORPUS_FILE)
+        if args.preview:
+            print(emailer.build_digest(documents, kg, days=args.days))
+            return 0
+        result = emailer.daily_digest(
+            documents, kg, config.EMAIL_RECIPIENTS_FILE, days=args.days
+        )
+    finally:
+        kg.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_review(_args):
+    """Audit data quality; accumulate findings in review.json."""
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        documents = corpus.load(config.CORPUS_FILE)
+        data = review.build_review(documents, kg)
+    finally:
+        kg.close()
+    print(review.render_review(data))
+    added = review.save_review(data, config.REVIEW_FILE)
+    print(
+        "\n%d new merge suggestion(s) recorded in %s"
+        % (added, config.REVIEW_FILE)
+    )
+    if added:
+        print(
+            "review them, then apply with: ailandscape correct merge "
+            "\"<from>\" \"<into>\""
+        )
+    return 0
+
+
+def cmd_trends(_args):
+    """Print temporal trends: document volume and new / active entities."""
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        documents = corpus.load(config.CORPUS_FILE)
+        text = trends.render_trends(trends.build_trends(documents, kg))
+    finally:
+        kg.close()
+    print(text)
+    return 0
+
+
 def cmd_visualize(args):
     config.ensure_dirs()
     kg = KnowledgeGraphStore(config.KG_DB)
@@ -193,6 +316,7 @@ def cmd_visualize(args):
             min_mentions=args.min_mentions,
             max_nodes=args.max_nodes,
             min_weight=args.min_weight,
+            relations_only=args.relations_only,
         )
     except ValueError as exc:
         print("error: %s" % exc, file=sys.stderr)
@@ -339,6 +463,20 @@ def build_parser():
     )
     sbir_p.set_defaults(func=cmd_sbir)
 
+    jbook_p = sub.add_parser(
+        "jbooks",
+        help="pull AI-related R&D items from DoD J-Books, then rebuild",
+    )
+    jbook_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None
+    )
+    jbook_p.set_defaults(func=cmd_jbooks)
+
+    sub.add_parser(
+        "backfill",
+        help="re-fetch corpus documents that stored only a short summary",
+    ).set_defaults(func=cmd_backfill)
+
     demo_p = sub.add_parser("demo", help="run the flow on the bundled sample feed")
     demo_p.add_argument(
         "--ner", choices=["rule", "spacy", "hybrid"], default=None
@@ -351,6 +489,42 @@ def build_parser():
     sub.add_parser(
         "overview", help="print a statistical overview of the data"
     ).set_defaults(func=cmd_overview)
+
+    brief_p = sub.add_parser(
+        "briefing", help="print a generated briefing of the landscape"
+    )
+    brief_p.add_argument(
+        "--days", type=int, default=7,
+        help="recency window (days) for the recent-documents section",
+    )
+    brief_p.add_argument(
+        "--narrative", action="store_true",
+        help="also generate an LLM analyst narrative (needs ANTHROPIC_API_KEY)",
+    )
+    brief_p.set_defaults(func=cmd_briefing)
+
+    sub.add_parser(
+        "trends", help="print temporal trends from the corpus and graph"
+    ).set_defaults(func=cmd_trends)
+
+    sub.add_parser(
+        "review",
+        help="audit data quality; accumulate merge suggestions in review.json",
+    ).set_defaults(func=cmd_review)
+
+    digest_p = sub.add_parser(
+        "digest",
+        help="send (or --preview) the daily email digest; opt-in via env+file",
+    )
+    digest_p.add_argument(
+        "--days", type=int, default=7,
+        help="recency window (days) for the briefing inside the digest",
+    )
+    digest_p.add_argument(
+        "--preview", action="store_true",
+        help="print the digest body instead of sending it",
+    )
+    digest_p.set_defaults(func=cmd_digest)
 
     viz_p = sub.add_parser(
         "visualize", help="render an interactive HTML graph visualization"
@@ -365,6 +539,10 @@ def build_parser():
     viz_p.add_argument("--min-mentions", type=int, default=0, dest="min_mentions")
     viz_p.add_argument("--max-nodes", type=int, default=70, dest="max_nodes")
     viz_p.add_argument("--min-weight", type=int, default=3, dest="min_weight")
+    viz_p.add_argument(
+        "--relations-only", action="store_true", dest="relations_only",
+        help="show only typed semantic relationships, dropping co-occurrence",
+    )
     viz_p.add_argument("--output", default=None, help="output HTML file path")
     viz_p.set_defaults(func=cmd_visualize)
 

@@ -24,12 +24,32 @@ class FeedError(Exception):
     """Raised when a feed cannot be fetched."""
 
 
+class _Follow308(urllib.request.HTTPRedirectHandler):
+    """Follow HTTP 308 (Permanent Redirect).
+
+    Python 3.9's urllib does not handle 308 (only 3.11+ does), so a modern
+    site that 308-redirects — commonly a request for a URL missing its
+    trailing slash — fails the fetch outright. Treating 308 like 307 follows
+    it. This was the cause of every OpenAI feed article storing only a teaser.
+    """
+
+    def http_error_308(self, req, fp, code, msg, headers):
+        # Delegate as a 307: HTTPRedirectHandler.redirect_request raises
+        # rather than follow any code outside {301,302,303,307}, so the 308
+        # must be presented to it as a 307 (identical method-preserving
+        # follow semantics) to actually be followed.
+        return self.http_error_307(req, fp, 307, msg, headers)
+
+
+_OPENER = urllib.request.build_opener(_Follow308())
+
+
 def _fetch_url(url, timeout=None):
     timeout = config.HTTP_TIMEOUT if timeout is None else timeout
     req = urllib.request.Request(
         url, headers={"User-Agent": config.HTTP_USER_AGENT}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _OPENER.open(req, timeout=timeout) as resp:
         return resp.read()
 
 
@@ -103,7 +123,10 @@ def extract_text_from_html(html, fallback=""):
     """Extract an article's main text from page HTML using trafilatura.
 
     trafilatura strips navigation, ads, captions, and other boilerplate.
-    Returns `fallback` if trafilatura is unavailable or finds no usable text.
+    Precision mode is tried first; recall mode is then tried too, and the
+    longest result is kept — some pages yield nothing under precision mode
+    but extract cleanly under recall. Returns `fallback` if trafilatura is
+    unavailable or no mode beats it.
     """
     if not html:
         return fallback
@@ -111,13 +134,17 @@ def extract_text_from_html(html, fallback=""):
         import trafilatura
     except ImportError:
         return fallback
-    try:
-        text = trafilatura.extract(
-            html, include_comments=False, favor_precision=True
-        )
-    except Exception:
-        return fallback
-    return text or fallback
+    best = fallback
+    for favor_precision in (True, False):
+        try:
+            text = trafilatura.extract(
+                html, include_comments=False, favor_precision=favor_precision
+            )
+        except Exception:
+            text = None
+        if text and len(text) > len(best):
+            best = text
+    return best
 
 
 def extract_article(url, fallback=""):

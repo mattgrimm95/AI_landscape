@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -18,8 +19,16 @@ def _node(nid, name, ntype, mentions=1):
     }
 
 
-def _edge(src, dst, weight=1):
-    return {"src_id": src, "dst_id": dst, "relation": "co_occurs_with", "weight": weight}
+def _edge(src, dst, weight=1, strength=None):
+    edge = {"src_id": src, "dst_id": dst, "relation": "co_occurs_with",
+            "weight": weight}
+    if strength is not None:
+        edge["metadata"] = json.dumps({"strength": strength})
+    return edge
+
+
+def _typed_edge(src, dst, relation="develops", weight=1):
+    return {"src_id": src, "dst_id": dst, "relation": relation, "weight": weight}
 
 
 class SelectSubgraphTest(unittest.TestCase):
@@ -65,12 +74,65 @@ class SelectSubgraphTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             visualize.select_subgraph(self.nodes, self.edges, focus="Nonexistent")
 
+    def test_default_view_leads_with_typed_relationship_nodes(self):
+        # F-35 (id 4) and Obscure Co (id 5) gain a typed edge; both should be
+        # pulled into a tight default view ahead of plain co-occurrence hubs.
+        edges = self.edges + [_typed_edge(5, 4, "develops")]
+        nodes, _e = visualize.select_subgraph(
+            self.nodes, edges, max_nodes=3, min_weight=1
+        )
+        ids = {n["id"] for n in nodes}
+        self.assertIn(4, ids)
+        self.assertIn(5, ids)
+
+    def test_focus_ranks_neighbors_by_strength(self):
+        nodes = [
+            _node(1, "Hub", "organization", 50),
+            _node(2, "Weak Link", "place", 5),
+            _node(3, "Strong Link", "place", 5),
+        ]
+        # Same raw weight; node 3's edge has the higher normalized strength.
+        edges = [_edge(1, 2, 10, strength=0.1), _edge(1, 3, 10, strength=0.9)]
+        sel, _e = visualize.select_subgraph(
+            nodes, edges, focus="Hub", max_nodes=2, min_weight=1
+        )
+        names = {n["canonical_name"] for n in sel}
+        self.assertIn("Strong Link", names)
+        self.assertNotIn("Weak Link", names)
+
+    def test_relations_only_drops_co_occurrence(self):
+        edges = self.edges + [_typed_edge(2, 4, "develops")]
+        nodes, sel_edges = visualize.select_subgraph(
+            self.nodes, edges, max_nodes=10, min_weight=1, relations_only=True
+        )
+        self.assertTrue(sel_edges)
+        self.assertTrue(
+            all(e["relation"] != "co_occurs_with" for e in sel_edges)
+        )
+        # Only the two typed-edge endpoints survive.
+        self.assertEqual({n["id"] for n in nodes}, {2, 4})
+
     def test_type_filter(self):
         nodes, _edges = visualize.select_subgraph(
             self.nodes, self.edges, node_type="place", max_nodes=10, min_weight=1
         )
         self.assertTrue(nodes)
         self.assertTrue(all(n["type"] == "place" for n in nodes))
+
+    def test_find_path_returns_shortest_route(self):
+        # Nodes 4 and 5 each connect only to the hub (node 1), so the path
+        # between them is 4 -> 1 -> 5.
+        steps = visualize.find_path(self.nodes, self.edges, 4, 5)
+        self.assertEqual(len(steps), 2)
+        self.assertEqual(steps[0][0], 4)
+        self.assertEqual(steps[-1][1], 5)
+
+    def test_find_path_disconnected_returns_empty(self):
+        nodes = [_node(1, "A", "place"), _node(2, "B", "place")]
+        self.assertEqual(visualize.find_path(nodes, [], 1, 2), [])
+
+    def test_find_path_same_node_is_empty(self):
+        self.assertEqual(visualize.find_path(self.nodes, self.edges, 1, 1), [])
 
     @unittest.skipUnless(_HAS_PYVIS, "pyvis not installed")
     def test_render_writes_self_contained_html(self):

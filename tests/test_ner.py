@@ -32,6 +32,16 @@ class NerTest(unittest.TestCase):
         self.assertIn("United States", found)
         self.assertIn("Department of Defense", found)
 
+    def test_ai_capability_concepts(self):
+        # Multi-word AI capabilities resolve to canonical concept nodes.
+        found = ner.extract(
+            "The lab applies computer vision and reinforcement learning.",
+            backend="rule",
+        )
+        concepts = {e["text"]: e["label"] for e in found}
+        self.assertEqual(concepts.get("Computer Vision"), "concept")
+        self.assertEqual(concepts.get("Reinforcement Learning"), "concept")
+
     def test_lowercase_single_word_not_an_entity(self):
         # A lowercase common word must not match a single-word gazetteer key.
         found = texts(ner.extract("They built an army of drones.", backend="rule"))

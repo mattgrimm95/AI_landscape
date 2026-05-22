@@ -10,10 +10,15 @@ import datetime
 import json
 import time
 
-from . import config, corpus, ner, reconcile, sbir, scraper
+from . import config, corpus, jbooks, ner, reconcile, sbir, scraper
 
 # Polite pause between article-page fetches during scraping.
 ARTICLE_FETCH_DELAY = 1.0
+
+# Corpus documents with less body text than this stored only a feed teaser
+# (their article page failed to extract at scrape time) and are candidates
+# for a re-fetch by `backfill_corpus_text`.
+SHORT_TEXT_THRESHOLD = 400
 
 
 def _utcnow():
@@ -34,6 +39,7 @@ def make_record(article):
         "fetched_at": _utcnow(),
         "content_hash": scraper.content_hash(article),
         "raw_text": article.get("raw_text", ""),
+        "metadata": article.get("metadata", {}),
     }
 
 
@@ -132,6 +138,79 @@ def scrape_sbir_into_corpus(sbir_queries, corpus_path, log=None):
     return {"sbir_added": added}
 
 
+def backfill_corpus_text(corpus_path, log=None):
+    """Re-fetch the page text of corpus documents that stored only a short
+    summary — articles whose pages failed to extract at scrape time and fell
+    back to the feed's teaser.
+
+    A document's `raw_text` is replaced only when the re-fetch yields
+    substantially more text, so a backfill can only improve the corpus, never
+    degrade it. `content_hash` is derived from URL + title (never the body),
+    so repaired text keeps the document's identity and a rebuild stays
+    deterministic.
+    """
+    log = log or (lambda *_a: None)
+    documents = corpus.load(corpus_path)
+    repaired = 0
+    for doc in documents:
+        body = (doc.get("raw_text") or "").strip()
+        url = doc.get("url", "")
+        if len(body) >= SHORT_TEXT_THRESHOLD or not url:
+            continue
+        better = scraper.extract_article(url, fallback=body).strip()
+        # Replace only on a clear improvement, so a failed re-fetch (which
+        # returns the short fallback) leaves the document untouched.
+        if len(better) > max(2 * len(body), SHORT_TEXT_THRESHOLD):
+            doc["raw_text"] = better
+            repaired += 1
+            log("backfilled %s" % (doc.get("title", "")[:70]))
+        time.sleep(ARTICLE_FETCH_DELAY)
+    if repaired:
+        corpus.save(corpus_path, documents)
+    return {"scanned": len(documents), "repaired": repaired}
+
+
+def scrape_jbooks_into_corpus(jbook_sources, corpus_path, log=None):
+    """Step 1 (non-RSS): pull AI-related R&D items from DoD J-Books.
+
+    Each source's budget-materials index page is crawled for PDFs; PDFs are
+    fetched, their text extracted, and the AI-related R&D program elements
+    appended to the corpus. Tolerant of failure: if a source page fails or
+    pypdf is not installed, that source is skipped for the run, the rest of
+    the pipeline continues. New additions are capped per run.
+    """
+    log = log or (lambda *_a: None)
+    known = corpus.hashes(corpus_path)
+    added = 0
+    for source in jbook_sources:
+        if added >= jbooks.MAX_JBOOK_PROJECTS:
+            break
+        try:
+            articles = jbooks.fetch_jbook_articles(
+                source["url"], source["fiscal_year"], source["agency"],
+                log=log,
+            )
+        except jbooks.JBookError as exc:
+            log("WARN J-Book source (%s) failed: %s"
+                % (source["url"], exc))
+            continue
+        log(
+            "J-Book %s %s: %d AI-related items"
+            % (source["agency"], source["fiscal_year"], len(articles))
+        )
+        for article in articles:
+            if added >= jbooks.MAX_JBOOK_PROJECTS:
+                break
+            chash = scraper.content_hash(article)
+            if chash in known:
+                continue
+            known.add(chash)
+            corpus.append(corpus_path, make_record(article))
+            added += 1
+            log("corpus += [J-Book] %s" % (article.get("title", "")[:64]))
+    return {"jbooks_added": added}
+
+
 def rebuild(
     corpus_path, ner_log, kg_store, ner_backend=None, corrections=None, log=None
 ):
@@ -174,6 +253,7 @@ def _record_run(result, scrape_seconds, rebuild_seconds):
         "fetched": result["scrape"]["fetched"],
         "added": result["scrape"]["added"],
         "sbir_added": result["scrape"].get("sbir_added", 0),
+        "jbooks_added": result["scrape"].get("jbooks_added", 0),
         "documents": result["documents"],
         "entities": result["entities"],
         "nodes": result["graph"]["nodes"],
@@ -190,21 +270,25 @@ def run(
     ner_log,
     kg_store,
     sbir_queries=None,
+    jbook_sources=None,
     ner_backend=None,
     corrections=None,
     log=None,
 ):
     """Run the entire flow: scrape into the corpus, then rebuild everything.
 
-    Scrapes RSS/Atom feeds and, when `sbir_queries` is given, AI-related
-    SBIR/STTR awards. Records the run's timing and counts to the run-history
-    log.
+    Scrapes RSS/Atom feeds and, when given, AI-related SBIR/STTR awards and
+    DoD J-Books. Records the run's timing and counts to the run-history log.
     """
     log = log or (lambda *_a: None)
     started = time.time()
     scrape = scrape_into_corpus(feeds, corpus_path, log=log)
     if sbir_queries:
         scrape.update(scrape_sbir_into_corpus(sbir_queries, corpus_path, log=log))
+    if jbook_sources:
+        scrape.update(
+            scrape_jbooks_into_corpus(jbook_sources, corpus_path, log=log)
+        )
     scrape_seconds = time.time() - started
 
     started = time.time()

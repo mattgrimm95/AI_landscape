@@ -8,6 +8,7 @@ either the most-connected entities, or a chosen entity and its neighborhood
 """
 
 import collections
+import json
 
 # A consistent, legible colour per entity type.
 _TYPE_COLORS = {
@@ -32,6 +33,22 @@ def _degree(edges):
     return degree
 
 
+def _edge_strength(edge):
+    """Normalized co-occurrence strength (Jaccard, 0..1) stored on the edge.
+
+    Typed semantic edges always score 1.0 so they rank above co-occurrence.
+    """
+    if edge["relation"] != "co_occurs_with":
+        return 1.0
+    meta = edge.get("metadata")
+    if not meta:
+        return 0.0
+    try:
+        return json.loads(meta).get("strength", 0.0) or 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def select_subgraph(
     nodes,
     edges,
@@ -40,12 +57,17 @@ def select_subgraph(
     min_mentions=0,
     max_nodes=70,
     min_weight=3,
+    relations_only=False,
 ):
     """Pick a comprehensible subgraph to render.
 
     With `focus`, returns the matching entity plus its strongest neighbors;
-    otherwise returns the most-connected entities. Type / mention / edge-weight
-    filters narrow the result. Returns (nodes, edges) as filtered lists.
+    otherwise returns the most *informative* entities — those participating
+    in typed semantic relationships first, then the most-connected — so the
+    default view leads with signal rather than a co-occurrence hairball.
+    Type / mention / edge-weight filters narrow the result. With
+    `relations_only`, plain co-occurrence is dropped entirely, leaving just
+    the typed-relationship graph. Returns (nodes, edges) as filtered lists.
     """
     by_id = {n["id"]: n for n in nodes}
     candidates = [
@@ -56,6 +78,18 @@ def select_subgraph(
     ]
     candidate_ids = {n["id"] for n in candidates}
 
+    # Typed-relationship participation among the candidates — the signal the
+    # default view and the relations-only view are built around.
+    typed_degree = collections.Counter()
+    for edge in edges:
+        if (
+            edge["relation"] != "co_occurs_with"
+            and edge["src_id"] in candidate_ids
+            and edge["dst_id"] in candidate_ids
+        ):
+            typed_degree[edge["src_id"]] += 1
+            typed_degree[edge["dst_id"]] += 1
+
     if focus:
         needle = focus.lower()
         match = next(
@@ -63,10 +97,12 @@ def select_subgraph(
         )
         if match is None:
             raise ValueError("no entity matching %r" % focus)
-        neighbor_weight = {}
+        neighbor_score = {}
         for edge in edges:
-            # Typed semantic edges always count; co-occurrence is filtered.
-            if edge["relation"] == "co_occurs_with" and edge["weight"] < min_weight:
+            is_typed = edge["relation"] != "co_occurs_with"
+            # Typed semantic edges always count; co-occurrence is filtered,
+            # and dropped outright in relations-only mode.
+            if not is_typed and (relations_only or edge["weight"] < min_weight):
                 continue
             other = None
             if edge["src_id"] == match["id"]:
@@ -74,35 +110,90 @@ def select_subgraph(
             elif edge["dst_id"] == match["id"]:
                 other = edge["src_id"]
             if other is not None and other in candidate_ids:
-                neighbor_weight[other] = max(
-                    neighbor_weight.get(other, 0), edge["weight"]
+                # Rank neighbors by normalized strength, so a focused entity's
+                # genuine associations surface ahead of links to mega-hubs.
+                neighbor_score[other] = max(
+                    neighbor_score.get(other, 0.0), _edge_strength(edge)
                 )
         keep = {match["id"]}
-        for nid, _w in sorted(
-            neighbor_weight.items(), key=lambda kv: kv[1], reverse=True
+        for nid, _s in sorted(
+            neighbor_score.items(), key=lambda kv: kv[1], reverse=True
         ):
             if len(keep) >= max_nodes:
                 break
             keep.add(nid)
     else:
         degree = _degree(edges)
+        pool = candidates
+        if relations_only:
+            pool = [n for n in candidates if typed_degree.get(n["id"], 0)]
+        # Typed-relationship participants first, then the most-connected.
         ranked = sorted(
-            candidates,
-            key=lambda n: (degree.get(n["id"], 0), n["mention_count"]),
+            pool,
+            key=lambda n: (
+                typed_degree.get(n["id"], 0),
+                degree.get(n["id"], 0),
+                n["mention_count"],
+            ),
             reverse=True,
         )
         keep = {n["id"] for n in ranked[:max_nodes]}
 
     sel_nodes = [by_id[i] for i in keep if i in by_id]
-    sel_edges = [
-        e
-        for e in edges
-        if e["src_id"] in keep
-        and e["dst_id"] in keep
-        # Typed semantic edges always shown; co-occurrence is weight-filtered.
-        and (e["relation"] != "co_occurs_with" or e["weight"] >= min_weight)
-    ]
+    sel_edges = []
+    for e in edges:
+        if e["src_id"] not in keep or e["dst_id"] not in keep:
+            continue
+        if e["relation"] == "co_occurs_with":
+            # Co-occurrence is weight-filtered, and dropped in relations-only
+            # mode; typed semantic edges are always shown.
+            if relations_only or e["weight"] < min_weight:
+                continue
+        sel_edges.append(e)
     return sel_nodes, sel_edges
+
+
+def find_path(nodes, edges, src_id, dst_id):
+    """Shortest path between two node ids, as a list of (from, to, edge) steps.
+
+    A breadth-first search by hop count. Typed semantic edges are expanded
+    before co-occurrence ones, so among equally short routes a meaningful
+    typed-relationship path is preferred. Returns [] if the two nodes are the
+    same or not connected.
+    """
+    if src_id == dst_id:
+        return []
+    adjacency = {}
+    for edge in edges:
+        adjacency.setdefault(edge["src_id"], []).append((edge["dst_id"], edge))
+        adjacency.setdefault(edge["dst_id"], []).append((edge["src_id"], edge))
+    # Expand typed edges first so BFS records them as predecessors.
+    for neighbors in adjacency.values():
+        neighbors.sort(
+            key=lambda pair: pair[1]["relation"] == "co_occurs_with"
+        )
+
+    came_from = {src_id: None}
+    queue = collections.deque([src_id])
+    while queue:
+        current = queue.popleft()
+        if current == dst_id:
+            break
+        for neighbor, edge in adjacency.get(current, []):
+            if neighbor not in came_from:
+                came_from[neighbor] = (current, edge)
+                queue.append(neighbor)
+
+    if dst_id not in came_from:
+        return []
+    steps = []
+    node = dst_id
+    while came_from[node] is not None:
+        previous, edge = came_from[node]
+        steps.append((previous, node, edge))
+        node = previous
+    steps.reverse()
+    return steps
 
 
 def render(nodes, edges, output_path, title="AI Landscape Knowledge Graph"):

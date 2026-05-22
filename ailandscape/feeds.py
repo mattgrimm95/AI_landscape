@@ -46,3 +46,17 @@ SBIR_QUERIES = [
     {"agency": "DOD", "year": 2025, "max_records": 400},
     {"agency": "DOD", "year": 2024, "max_records": 400},
 ]
+
+# DoD budget Justification Books (see ailandscape/jbooks.py). AI-related,
+# R&D-focused, FY26 + FY27 only for now per the project's scope.
+JBOOK_SOURCES = [
+    {"url": "https://comptroller.war.gov/Budget-Materials/"
+            "FY2027BudgetJustification/",
+     "fiscal_year": "FY2027", "agency": "Defense-Wide"},
+    {"url": "https://comptroller.war.gov/Budget-Materials/"
+            "FY2026BudgetJustification/",
+     "fiscal_year": "FY2026", "agency": "Defense-Wide"},
+    {"url": "https://www.af.mil/Secretariat-of-the-Air-Force/"
+            "Financial-Management-SAF-FM/",
+     "fiscal_year": "FY2026-FY2027", "agency": "Air Force"},
+]

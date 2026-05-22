@@ -1,0 +1,326 @@
+{
+  "suggested_merges": [
+    {
+      "from": "Acceptance",
+      "into": "Letter of Acceptance",
+      "type": "organization"
+    },
+    {
+      "from": "Agarwal",
+      "into": "Vishal Agarwal",
+      "type": "organization"
+    },
+    {
+      "from": "Alliance",
+      "into": "Frontier Alliance",
+      "type": "organization"
+    },
+    {
+      "from": "Allied",
+      "into": "Supreme Allied",
+      "type": "organization"
+    },
+    {
+      "from": "AlphaEvolve",
+      "into": "Google Research\nAlphaEvolve",
+      "type": "organization"
+    },
+    {
+      "from": "Antigravity",
+      "into": "Google Antigravity",
+      "type": "organization"
+    },
+    {
+      "from": "API",
+      "into": "Windows Data Protection API",
+      "type": "organization"
+    },
+    {
+      "from": "Arab",
+      "into": "Gulf Arab",
+      "type": "group"
+    },
+    {
+      "from": "Arihant",
+      "into": "INS Arihant",
+      "type": "organization"
+    },
+    {
+      "from": "Bauer",
+      "into": "Austrian Ministry of Defense spokesperson Michael Bauer",
+      "type": "organization"
+    },
+    {
+      "from": "Bay",
+      "into": "Deadline, Bay",
+      "type": "place"
+    },
+    {
+      "from": "Benchmarks",
+      "into": "Community Benchmarks",
+      "type": "organization"
+    },
+    {
+      "from": "Blitz",
+      "into": "Individual Blitz",
+      "type": "organization"
+    },
+    {
+      "from": "CHI",
+      "into": "Theta Delta Chi",
+      "type": "organization"
+    },
+    {
+      "from": "CLI",
+      "into": "Codex CLI",
+      "type": "organization"
+    },
+    {
+      "from": "Co-Scientist",
+      "into": "Testing Co-Scientist",
+      "type": "organization"
+    },
+    {
+      "from": "Drive",
+      "into": "Google Drive",
+      "type": "organization"
+    },
+    {
+      "from": "EECS",
+      "into": "Department of EECS",
+      "type": "organization"
+    },
+    {
+      "from": "Emirates",
+      "into": "United Arab Emirates",
+      "type": "place"
+    },
+    {
+      "from": "England",
+      "into": "New England",
+      "type": "place"
+    },
+    {
+      "from": "Eurofighters",
+      "into": "Once Austrian Eurofighters",
+      "type": "organization"
+    },
+    {
+      "from": "Felon",
+      "into": "Su-57 Felon",
+      "type": "product"
+    },
+    {
+      "from": "Finances",
+      "into": "Without Finances",
+      "type": "organization"
+    },
+    {
+      "from": "German",
+      "into": "no German",
+      "type": "group"
+    },
+    {
+      "from": "Growlers",
+      "into": "EA-18G Growlers",
+      "type": "organization"
+    },
+    {
+      "from": "Guns",
+      "into": "Search For New Machine Guns",
+      "type": "organization"
+    },
+    {
+      "from": "healthcare",
+      "into": "Hartford HealthCare",
+      "type": "organization"
+    },
+    {
+      "from": "Heames",
+      "into": "Rear Adm. Jeffrey Heames",
+      "type": "organization"
+    },
+    {
+      "from": "Hemisphere",
+      "into": "Western Hemisphere",
+      "type": "place"
+    },
+    {
+      "from": "Hill",
+      "into": "Capitol Hill",
+      "type": "organization"
+    },
+    {
+      "from": "Home",
+      "into": "Mountain Home",
+      "type": "place"
+    },
+    {
+      "from": "Honeycutt",
+      "into": "Olivia Honeycutt",
+      "type": "organization"
+    },
+    {
+      "from": "Hornet",
+      "into": "Destinus Hornet",
+      "type": "place"
+    },
+    {
+      "from": "Illinois",
+      "into": "Southern Illinois",
+      "type": "place"
+    },
+    {
+      "from": "Inference",
+      "into": "Natural Language Inference",
+      "type": "organization"
+    },
+    {
+      "from": "Instagram",
+      "into": "Content Credentials on Instagram",
+      "type": "organization"
+    },
+    {
+      "from": "Kingdom",
+      "into": "United Kingdom",
+      "type": "place"
+    },
+    {
+      "from": "KPI",
+      "into": "Latest KPI",
+      "type": "organization"
+    },
+    {
+      "from": "Language",
+      "into": "American Sign Language",
+      "type": "place"
+    },
+    {
+      "from": "Lebanon",
+      "into": "South Lebanon",
+      "type": "place"
+    },
+    {
+      "from": "Lithuania",
+      "into": "\u0160iauliai, Lithuania",
+      "type": "place"
+    },
+    {
+      "from": "LOCUST",
+      "into": "kW LOCUST",
+      "type": "organization"
+    },
+    {
+      "from": "London",
+      "into": "New London",
+      "type": "place"
+    },
+    {
+      "from": "Marines",
+      "into": "US Marines",
+      "type": "group"
+    },
+    {
+      "from": "Matviyuk",
+      "into": "Ihor Matviyuk",
+      "type": "organization"
+    },
+    {
+      "from": "MBA",
+      "into": "Stanford MBA",
+      "type": "organization"
+    },
+    {
+      "from": "MIT",
+      "into": "Broad Institute of MIT",
+      "type": "organization"
+    },
+    {
+      "from": "MSE",
+      "into": "PAC-3 MSE",
+      "type": "organization"
+    },
+    {
+      "from": "Nair",
+      "into": "Suraj Nair",
+      "type": "organization"
+    },
+    {
+      "from": "NDAA",
+      "into": "FY2026 NDAA",
+      "type": "organization"
+    },
+    {
+      "from": "Nexus",
+      "into": "Intelic\u2019s Nexus",
+      "type": "organization"
+    },
+    {
+      "from": "Oman",
+      "into": "Gulf of Oman",
+      "type": "place"
+    },
+    {
+      "from": "Skills",
+      "into": "Science Skills",
+      "type": "organization"
+    },
+    {
+      "from": "Somalia",
+      "into": "Federal Republic of Somalia",
+      "type": "place"
+    },
+    {
+      "from": "SSH",
+      "into": "Remote SSH",
+      "type": "organization"
+    },
+    {
+      "from": "Stockholm",
+      "into": "City of Stockholm",
+      "type": "place"
+    },
+    {
+      "from": "Teachers",
+      "into": "American Federation for Teachers",
+      "type": "organization"
+    },
+    {
+      "from": "Telegram",
+      "into": "Fighterbomber Telegram",
+      "type": "organization"
+    },
+    {
+      "from": "Transformer",
+      "into": "Protein Evolutionary Transformer",
+      "type": "organization"
+    },
+    {
+      "from": "TTS",
+      "into": "Artificial Analysis TTS",
+      "type": "organization"
+    },
+    {
+      "from": "Uber",
+      "into": "Product Management at Uber",
+      "type": "organization"
+    },
+    {
+      "from": "USV",
+      "into": "Yaktu USV",
+      "type": "organization"
+    },
+    {
+      "from": "UXD",
+      "into": "Humane UXD",
+      "type": "organization"
+    }
+  ],
+  "history": [
+    {
+      "nodes": 6238,
+      "singletons": 4173,
+      "new_suggestions": 63
+    }
+  ]
+}

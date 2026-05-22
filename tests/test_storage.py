@@ -73,6 +73,20 @@ class KnowledgeGraphStoreTest(unittest.TestCase):
         self.assertEqual(self.kg.count_nodes(), 0)
         self.assertEqual(self.kg.count_edges(), 0)
 
+    def test_node_documents_round_trip(self):
+        china = self.kg.insert_node("China", "place")
+        # A repeated hash is ignored; results come back sorted.
+        self.kg.insert_node_documents(china, ["h2", "h1", "h1"])
+        self.kg.commit()
+        self.assertEqual(self.kg.documents_for_node(china), ["h1", "h2"])
+
+    def test_clear_removes_node_documents(self):
+        china = self.kg.insert_node("China", "place")
+        self.kg.insert_node_documents(china, ["h1"])
+        self.kg.commit()
+        self.kg.clear()
+        self.assertEqual(self.kg.documents_for_node(china), [])
+
 
 if __name__ == "__main__":
     unittest.main()
