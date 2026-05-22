@@ -6,6 +6,8 @@ Usage:
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli overview   print a statistical overview of the data
+    python -m ailandscape.cli visualize  render an interactive HTML graph
+    python -m ailandscape.cli correct merge "DoD" "Department of Defense"
     python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
 
@@ -20,7 +22,7 @@ import os
 import sys
 import tempfile
 
-from . import config, corpus, pipeline, reconcile, report, scraper
+from . import config, corpus, pipeline, reconcile, report, scraper, visualize
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -141,6 +143,82 @@ def cmd_overview(_args):
     return 0
 
 
+def cmd_visualize(args):
+    config.ensure_dirs()
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        nodes = kg.nodes()
+        edges = kg.edges()
+    finally:
+        kg.close()
+    if not nodes:
+        print("the graph is empty — run 'rebuild' first.", file=sys.stderr)
+        return 1
+    try:
+        sel_nodes, sel_edges = visualize.select_subgraph(
+            nodes,
+            edges,
+            focus=args.focus,
+            node_type=args.type,
+            min_mentions=args.min_mentions,
+            max_nodes=args.max_nodes,
+            min_weight=args.min_weight,
+        )
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    output = args.output or str(config.GRAPH_HTML)
+    heading = (
+        "AI Landscape - %s" % args.focus
+        if args.focus
+        else "AI Landscape Knowledge Graph"
+    )
+    visualize.render(sel_nodes, sel_edges, output, title=heading)
+    print(
+        "wrote %d nodes, %d edges -> %s"
+        % (len(sel_nodes), len(sel_edges), output)
+    )
+    print("open it in a browser to explore (zoom, pan, click a node).")
+    return 0
+
+
+def cmd_correct(args):
+    path = CORRECTIONS_FILE
+    data = {"merge": {}, "ignore": []}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("corrections.json is not valid JSON; aborting.", file=sys.stderr)
+            return 1
+    data.setdefault("merge", {})
+    data.setdefault("ignore", [])
+    if args.action == "merge":
+        if len(args.terms) != 2:
+            print(
+                "merge needs two arguments: <surface form> <canonical name>",
+                file=sys.stderr,
+            )
+            return 1
+        surface, canonical = args.terms
+        data["merge"][surface] = canonical
+        print("recorded merge: %r -> %r" % (surface, canonical))
+    else:  # ignore
+        if len(args.terms) != 1:
+            print(
+                "ignore needs one argument: <surface form>", file=sys.stderr
+            )
+            return 1
+        term = args.terms[0]
+        if term not in data["ignore"]:
+            data["ignore"].append(term)
+        print("recorded ignore: %r" % term)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print("updated %s" % path)
+    print("run 'rebuild' to apply the correction.")
+    return 0
+
+
 def cmd_snapshot(_args):
     ner_log, kg = _open_stores()
     try:
@@ -217,6 +295,33 @@ def build_parser():
     sub.add_parser(
         "overview", help="print a statistical overview of the data"
     ).set_defaults(func=cmd_overview)
+
+    viz_p = sub.add_parser(
+        "visualize", help="render an interactive HTML graph visualization"
+    )
+    viz_p.add_argument(
+        "--focus", default=None,
+        help="center the view on one entity and its neighborhood",
+    )
+    viz_p.add_argument(
+        "--type", default=None, help="only include entities of this type"
+    )
+    viz_p.add_argument("--min-mentions", type=int, default=0, dest="min_mentions")
+    viz_p.add_argument("--max-nodes", type=int, default=70, dest="max_nodes")
+    viz_p.add_argument("--min-weight", type=int, default=3, dest="min_weight")
+    viz_p.add_argument("--output", default=None, help="output HTML file path")
+    viz_p.set_defaults(func=cmd_visualize)
+
+    correct_p = sub.add_parser(
+        "correct", help="record a manual correction in corrections.json"
+    )
+    correct_p.add_argument("action", choices=["merge", "ignore"])
+    correct_p.add_argument(
+        "terms",
+        nargs="+",
+        help="merge: <surface form> <canonical name>;  ignore: <surface form>",
+    )
+    correct_p.set_defaults(func=cmd_correct)
     sub.add_parser(
         "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)

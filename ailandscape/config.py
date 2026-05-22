@@ -18,6 +18,9 @@ KG_DB = DATA_DIR / "knowledge_graph.db"
 # report. Derived data — lives under the gitignored data/ directory.
 RUN_HISTORY_FILE = DATA_DIR / "run_history.jsonl"
 
+# Default output path for the interactive graph visualization (derived).
+GRAPH_HTML = DATA_DIR / "knowledge_graph.html"
+
 HTTP_USER_AGENT = (
     "AILandscapeBot/0.1 (research project; "
     "+https://github.com/mattgrimm95/AI_landscape)"

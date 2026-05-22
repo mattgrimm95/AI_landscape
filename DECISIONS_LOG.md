@@ -263,3 +263,25 @@ A high-level record of steps taken and decisions made while implementing the
   collapse to 6,000 nodes, but ~69% of nodes are single-mention (long tail /
   noise) and ~277 look like partial-name duplicates — both point at
   entity-resolution as the next improvement (tracked in TODO).
+
+## 2026-05-22 — Interactive knowledge-graph visualization
+
+- Added `visualize.py` and a `visualize` CLI command: renders a
+  self-contained interactive HTML graph with pyvis / vis.js — zoom, pan,
+  drag; hover a node for its details; click a node to highlight its
+  neighborhood and dim the rest; a dropdown finds any entity.
+- The full graph (6,000 nodes / 95k edges) is an unreadable hairball, so a
+  comprehensible subgraph is selected first: by default the ~70
+  most-connected entities; `--focus "<entity>"` centers on one entity and
+  its neighborhood instead. Filters: `--type`, `--min-mentions`,
+  `--max-nodes`, `--min-weight`. Nodes are sized by mention count and
+  coloured by entity type.
+- Added a `correct` CLI command (`correct merge <surface> <canonical>` and
+  `correct ignore <surface>`) that records manual corrections in
+  `corrections.json`. `reconcile` already consumes that file, so a
+  `rebuild` applies corrections deterministically — the correction
+  propagates to a version-controlled data source while reconstruction stays
+  fully reproducible from corpus + corrections.
+- The pyvis HTML is static, so corrections are made via the CLI rather than
+  in-browser. An in-GUI correction editor would need a server-backed app
+  (e.g. Streamlit) — noted as a possible future enhancement.
