@@ -10,15 +10,22 @@ browser.
 The pipeline (see `app_plan.md`) runs in stages:
 
 ```
-RSS/Atom feeds                       ailandscape/feeds.py
-  -> scrape each article page        ailandscape/scraper.py   (trafilatura)
+RSS/Atom feeds + SBIR/STTR awards    ailandscape/feeds.py
+  -> scrape articles / fetch awards  ailandscape/scraper.py · sbir.py
   -> corpus/documents.jsonl          the version-controlled source of truth
   -> named-entity recognition        ailandscape/ner.py       (gazetteer + spaCy)
   -> NER output log (SQLite)         ailandscape/storage_ner.py
   -> reconcile / de-dup / coref      ailandscape/reconcile.py
+  -> typed relationships             ailandscape/relations.py
   -> knowledge graph (SQLite)        ailandscape/storage_kg.py
   -> explore                         web app / visualize / overview
 ```
+
+**Data sources.** Two kinds feed the corpus: defense and AI **news feeds**
+(RSS/Atom, roughly 2:1 defense-to-public), and **SBIR/STTR award records**
+from the SBIR.gov public API — awarded contracts are a concrete primary
+source for where defense AI funding goes. Awards have no keyword search, so
+`ailandscape/sbir.py` filters them to AI-related ones locally.
 
 **The corpus is the source of truth.** `corpus/documents.jsonl` is an
 append-only, committed file of scraped documents. Both SQLite databases
@@ -46,8 +53,9 @@ python -m spacy download en_core_web_sm
 ## Usage
 
 ```
-python -m ailandscape.cli run        # scrape new articles, then rebuild
+python -m ailandscape.cli run        # scrape articles + SBIR awards, then rebuild
 python -m ailandscape.cli rebuild    # rebuild the databases from the corpus
+python -m ailandscape.cli sbir       # pull AI-related SBIR/STTR awards, then rebuild
 python -m ailandscape.cli demo       # run the flow on the bundled sample feed
 python -m ailandscape.cli stats      # quick corpus / database counts
 python -m ailandscape.cli overview   # full statistical overview of the data

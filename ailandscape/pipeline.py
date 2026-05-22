@@ -10,7 +10,7 @@ import datetime
 import json
 import time
 
-from . import config, corpus, ner, reconcile, scraper
+from . import config, corpus, ner, reconcile, sbir, scraper
 
 # Polite pause between article-page fetches during scraping.
 ARTICLE_FETCH_DELAY = 1.0
@@ -84,6 +84,54 @@ def scrape_into_corpus(feeds, corpus_path, log=None):
     return {"fetched": len(articles), "added": added, "extracted": extracted}
 
 
+def scrape_sbir_into_corpus(sbir_queries, corpus_path, log=None):
+    """Step 1 (non-RSS): pull AI-related SBIR/STTR awards into the corpus.
+
+    For each query the SBIR API is paged, awards are filtered to AI-related
+    ones, and previously unseen awards are appended to the corpus. The
+    public API is aggressively gateway-throttled and can return HTTP 429
+    for every request, so this is tolerant of failure: if the first query
+    fails, SBIR is skipped for the run and the rest of the pipeline
+    continues — the same way a single failed RSS feed is tolerated. New
+    additions are capped per run so SBIR cannot dominate the corpus.
+    """
+    log = log or (lambda *_a: None)
+    known = corpus.hashes(corpus_path)
+    added = 0
+    for index, query in enumerate(sbir_queries):
+        if added >= sbir.MAX_AI_AWARDS:
+            break
+        agency = query.get("agency", "DOD")
+        year = query.get("year")
+        try:
+            awards = sbir.fetch_awards(
+                agency=agency,
+                year=year,
+                max_records=query.get("max_records", 200),
+            )
+        except sbir.SBIRError as exc:
+            log("WARN SBIR query (%s %s) failed: %s"
+                % (agency, year or "all years", exc))
+            if index == 0:
+                log("WARN skipping SBIR for this run (API unavailable)")
+                break
+            continue
+        articles = sbir.ai_articles(awards)
+        log("SBIR %s %s: %d awards fetched, %d AI-related"
+            % (agency, year or "all years", len(awards), len(articles)))
+        for article in articles:
+            if added >= sbir.MAX_AI_AWARDS:
+                break
+            chash = scraper.content_hash(article)
+            if chash in known:
+                continue
+            known.add(chash)
+            corpus.append(corpus_path, make_record(article))
+            added += 1
+            log("corpus += [SBIR] %s" % article.get("title", "")[:64])
+    return {"sbir_added": added}
+
+
 def rebuild(
     corpus_path, ner_log, kg_store, ner_backend=None, corrections=None, log=None
 ):
@@ -125,6 +173,7 @@ def _record_run(result, scrape_seconds, rebuild_seconds):
         "rebuild_seconds": round(rebuild_seconds, 1),
         "fetched": result["scrape"]["fetched"],
         "added": result["scrape"]["added"],
+        "sbir_added": result["scrape"].get("sbir_added", 0),
         "documents": result["documents"],
         "entities": result["entities"],
         "nodes": result["graph"]["nodes"],
@@ -140,17 +189,22 @@ def run(
     corpus_path,
     ner_log,
     kg_store,
+    sbir_queries=None,
     ner_backend=None,
     corrections=None,
     log=None,
 ):
     """Run the entire flow: scrape into the corpus, then rebuild everything.
 
-    Records the run's timing and counts to the run-history log.
+    Scrapes RSS/Atom feeds and, when `sbir_queries` is given, AI-related
+    SBIR/STTR awards. Records the run's timing and counts to the run-history
+    log.
     """
     log = log or (lambda *_a: None)
     started = time.time()
     scrape = scrape_into_corpus(feeds, corpus_path, log=log)
+    if sbir_queries:
+        scrape.update(scrape_sbir_into_corpus(sbir_queries, corpus_path, log=log))
     scrape_seconds = time.time() - started
 
     started = time.time()

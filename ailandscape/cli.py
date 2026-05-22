@@ -3,6 +3,7 @@
 Usage:
     python -m ailandscape.cli run        scrape new documents, then rebuild
     python -m ailandscape.cli rebuild    rebuild the NER log + graph from the corpus
+    python -m ailandscape.cli sbir       pull AI-related SBIR/STTR awards, then rebuild
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli overview   print a statistical overview of the data
@@ -49,6 +50,7 @@ def cmd_run(args):
             config.CORPUS_FILE,
             ner_log,
             kg,
+            sbir_queries=feeds_mod.SBIR_QUERIES,
             ner_backend=args.ner,
             corrections=reconcile.load_corrections(CORRECTIONS_FILE),
             log=_log,
@@ -56,6 +58,33 @@ def cmd_run(args):
     finally:
         ner_log.close()
         kg.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_sbir(args):
+    """Pull AI-related SBIR/STTR awards into the corpus, then rebuild."""
+    config.ensure_dirs()
+    result = pipeline.scrape_sbir_into_corpus(
+        feeds_mod.SBIR_QUERIES, config.CORPUS_FILE, log=_log
+    )
+    if result["sbir_added"]:
+        ner_log, kg = _open_stores()
+        try:
+            rebuilt = pipeline.rebuild(
+                config.CORPUS_FILE,
+                ner_log,
+                kg,
+                ner_backend=args.ner,
+                corrections=reconcile.load_corrections(CORRECTIONS_FILE),
+                log=_log,
+            )
+        finally:
+            ner_log.close()
+            kg.close()
+        result["graph"] = rebuilt["graph"]
+    else:
+        _log("no new SBIR awards added — the graph is unchanged.")
     print(json.dumps(result, indent=2))
     return 0
 
@@ -300,6 +329,15 @@ def build_parser():
         "--ner", choices=["rule", "spacy", "hybrid"], default=None
     )
     rebuild_p.set_defaults(func=cmd_rebuild)
+
+    sbir_p = sub.add_parser(
+        "sbir",
+        help="pull AI-related SBIR/STTR awards into the corpus, then rebuild",
+    )
+    sbir_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None
+    )
+    sbir_p.set_defaults(func=cmd_sbir)
 
     demo_p = sub.add_parser("demo", help="run the flow on the bundled sample feed")
     demo_p.add_argument(

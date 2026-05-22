@@ -36,3 +36,13 @@ FEEDS = [
     {"name": "Google DeepMind", "category": "public_ai",
      "url": "https://deepmind.google/blog/rss.xml"},
 ]
+
+# SBIR/STTR award queries — a non-RSS data source (see ailandscape/sbir.py).
+# The public SBIR.gov API has no keyword search, so awards are pulled per
+# agency and year and then filtered to AI-related ones. DOD-focused, to
+# match the project's national-security emphasis; awarded contracts are a
+# concrete, primary-source signal of where defense AI money is going.
+SBIR_QUERIES = [
+    {"agency": "DOD", "year": 2025, "max_records": 400},
+    {"agency": "DOD", "year": 2024, "max_records": 400},
+]

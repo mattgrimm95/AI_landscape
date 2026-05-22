@@ -361,3 +361,43 @@ A high-level record of steps taken and decisions made while implementing the
 - Rebuild result: 217 typed relationships across the 378-document corpus
   (leads 83, develops 41, awards_contract 25, partners_with 24, part_of 22,
   supplies 19, located_in 2, acquires 1). 67 tests pass.
+
+## 2026-05-22 — SBIR/STTR awards as a second data source
+
+- Added `ailandscape/sbir.py`: the first **non-RSS data source**. The
+  SBIR/STTR programs fund early-stage R&D at small firms; SBIR.gov publishes
+  awarded contracts via a public JSON API (no key). Awarded contracts are a
+  concrete primary source for where defense AI funding actually goes.
+- The API has **no keyword search** (only agency / firm / year / research
+  institution), so AI relevance is decided locally: an award is kept if its
+  title, abstract, or research-area keywords match a broad AI term list
+  spanning core AI/ML, model families, perception, data science, and
+  embodied-AI robotics (`robotics`, `motion planning`, `imitation
+  learning`, ...). Acronyms (AI, ML, LLM, NLP, SLAM) are matched
+  case-sensitively as bare uppercase tokens, so they never fire on
+  lowercase fragments inside ordinary words ("ai" in "maintain").
+- Each AI award becomes a corpus document like any scraped article, so it
+  flows through the unchanged NER / reconcile / graph pipeline. The body is
+  an **active-voice lead sentence** ("&lt;agency&gt; awarded &lt;firm&gt; a
+  contract", plus a partnership sentence when a research institution is
+  named) followed by the project abstract — phrased so the typed-relation
+  extractor reads the funding direction correctly (agency -> firm). Verified
+  on the fixture: 4 awards yield agency/firm/PI/institution nodes plus
+  `awards_contract` and `partners_with` edges.
+- **Resilience**: the public API sits behind an AWS API gateway that
+  throttles hard and returns HTTP 429 (`TooManyRequestsError`). `fetch_awards`
+  backs off and retries on 429; if it still fails — or on any other status —
+  `SBIRError` is raised and `scrape_sbir_into_corpus` skips SBIR for that
+  run, the same soft-failure handling as a single dead RSS feed. New awards
+  are capped per run so SBIR cannot dominate the corpus.
+- Integration: `SBIR_QUERIES` in `feeds.py` (DOD-focused, recent years);
+  `run` scrapes feeds *and* SBIR; a dedicated `sbir` CLI command pulls
+  awards and rebuilds. `samples/sample_sbir.json` + `tests/test_sbir.py`
+  keep it deterministically tested without the network. 89 tests pass.
+- Status note: at implementation time the SBIR.gov API returned HTTP 429
+  (`TooManyRequestsError`, "The SBIR Public API is not available at this
+  time") for *every* request — the public endpoint appears throttled off at
+  the gateway, not a 503 maintenance page. So no live awards are in the
+  corpus yet; the integration degrades gracefully and will populate on the
+  next `run` / `sbir` once the endpoint is reachable. Verified end-to-end
+  against the fixture in the meantime.
