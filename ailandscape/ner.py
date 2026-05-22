@@ -1,8 +1,9 @@
 """Step 2 of the flow: named entity recognition.
 
-Two backends:
+Two backends, selected explicitly via config.DEFAULT_NER_BACKEND or the
+`--ner` CLI flag:
 - "rule": deterministic gazetteer + proper-noun extractor (no dependencies).
-- "spacy": used automatically if spaCy and en_core_web_sm are installed.
+- "spacy": statistical model (requires spaCy + en_core_web_sm installed).
 
 Each extracted entity is a dict: {text, label, start, end}.
 `label` is one of the normalized entity types below.
@@ -10,7 +11,7 @@ Each extracted entity is a dict: {text, label, start, end}.
 
 import re
 
-from . import gazetteer
+from . import config, gazetteer
 
 ENTITY_TYPES = {
     "place", "organization", "person", "group",
@@ -60,17 +61,12 @@ _GAZ_RE = _build_gazetteer_regex()
 
 
 def default_backend():
-    """Return 'spacy' if available and its model is installed, else 'rule'."""
-    try:
-        import importlib.util
+    """Return the configured default NER backend ('rule' or 'spacy').
 
-        if importlib.util.find_spec("spacy") and importlib.util.find_spec(
-            "en_core_web_sm"
-        ):
-            return "spacy"
-    except Exception:
-        pass
-    return "rule"
+    The default is an explicit configuration choice, not inferred from
+    whichever package happens to be installed.
+    """
+    return config.DEFAULT_NER_BACKEND
 
 
 def _clean(token):

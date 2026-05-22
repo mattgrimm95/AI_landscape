@@ -1,10 +1,11 @@
 # Runtime dependencies.
 beautifulsoup4>=4.9
+feedparser>=6.0
 trafilatura>=2.0
 lxml_html_clean>=0.1  # needed by trafilatura's justext dep on lxml >= 5.2
 
-# Optional: enables the higher-accuracy spaCy NER backend.
-# The pipeline runs fully without it (rule-based backend is the default).
-#   pip install spacy
+# Optional: the spaCy NER backend (select via --ner spacy or
+# config.DEFAULT_NER_BACKEND). The pipeline runs fully without it; the
+# rule-based backend is the default.
+#   pip install "spacy<3.8"   # spaCy 3.8+ requires Python 3.10+
 #   python -m spacy download en_core_web_sm
-# spacy>=3.5

@@ -20,6 +20,13 @@ HTTP_USER_AGENT = (
 )
 HTTP_TIMEOUT = 20
 
+# Default NER backend: "rule" (gazetteer + proper-noun extractor — fast, no
+# heavy dependencies, canonicalizes known defense entities) or "spacy"
+# (statistical model — types every entity, higher recall, but slower and
+# without gazetteer canonicalization). An explicit choice, not inferred from
+# whichever package happens to be installed.
+DEFAULT_NER_BACKEND = "rule"
+
 
 def ensure_dirs():
     """Create the data, snapshot, and corpus directories if they are missing."""

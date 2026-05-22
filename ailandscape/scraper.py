@@ -1,15 +1,16 @@
 """Step 1 of the flow: scrape articles.
 
-Feeds (RSS/Atom) are parsed for article links and metadata; each article
-page is then fetched and its main text extracted with trafilatura, which
-strips navigation, ads, captions, and other boilerplate. If an article page
-cannot be fetched or extracted, the feed's embedded content is used instead.
+Feeds (RSS/Atom) are parsed with `feedparser`, which tolerates malformed
+feeds and the many feed dialects. Each article page is then fetched and its
+main text extracted with `trafilatura`, which strips navigation, ads,
+captions, and other boilerplate. If an article page cannot be fetched or
+extracted, the feed's embedded content is used instead.
 """
 
 import hashlib
 import urllib.request
-import xml.etree.ElementTree as ET
 
+import feedparser
 from bs4 import BeautifulSoup
 
 from . import config
@@ -20,7 +21,7 @@ MAX_ARTICLES_PER_FEED = 50
 
 
 class FeedError(Exception):
-    """Raised when a feed cannot be fetched or parsed."""
+    """Raised when a feed cannot be fetched."""
 
 
 def _fetch_url(url, timeout=None):
@@ -39,56 +40,36 @@ def html_to_text(html):
     return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
 
 
-def _strip_namespaces(root):
-    """Drop XML namespaces so RSS and Atom tags can be found by local name."""
-    for el in root.iter():
-        if isinstance(el.tag, str) and "}" in el.tag:
-            el.tag = el.tag.split("}", 1)[1]
-    return root
-
-
-def _text_of(parent, *tag_names):
-    """Return the text of the first child matching any of tag_names."""
-    for name in tag_names:
-        el = parent.find(name)
-        if el is not None and el.text and el.text.strip():
-            return el.text.strip()
-    return ""
-
-
-def _link_of(item):
-    """Extract a link from an RSS <link>text</link> or Atom <link href=...>."""
-    el = item.find("link")
-    if el is not None:
-        if el.text and el.text.strip():
-            return el.text.strip()
-        href = el.get("href")
-        if href:
-            return href.strip()
-    return ""
+def _entry_body_html(entry):
+    """Return the richest body HTML available for a feed entry."""
+    content = entry.get("content")
+    if content:
+        value = content[0].get("value", "")
+        if value:
+            return value
+    return entry.get("summary", "") or entry.get("description", "")
 
 
 def parse_feed(raw, source_name):
-    """Parse RSS 2.0 or Atom feed content into a list of article dicts."""
-    # ElementTree rejects str input carrying an XML encoding declaration,
-    # so always hand it bytes.
-    data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
-    try:
-        root = _strip_namespaces(ET.fromstring(data))
-    except ET.ParseError as exc:
-        raise FeedError("could not parse feed XML: %s" % exc) from exc
+    """Parse RSS/Atom feed content into a list of article dicts.
 
-    items = root.findall(".//item") or root.findall(".//entry")
+    `raw` may be feed bytes or text. Malformed feeds are tolerated —
+    feedparser returns whatever entries it can recover.
+    """
+    parsed = feedparser.parse(raw)
     articles = []
-    for item in items:
-        title = _text_of(item, "title")
-        body_html = _text_of(item, "encoded", "content", "description", "summary")
+    for entry in parsed.entries:
         article = {
             "source": source_name,
-            "url": _link_of(item),
-            "title": title,
-            "published": _text_of(item, "pubDate", "published", "updated", "date"),
-            "raw_text": html_to_text(body_html),
+            "url": (entry.get("link") or "").strip(),
+            "title": (entry.get("title") or "").strip(),
+            "published": (
+                entry.get("published")
+                or entry.get("updated")
+                or entry.get("created")
+                or ""
+            ).strip(),
+            "raw_text": html_to_text(_entry_body_html(entry)),
         }
         if article["title"] or article["raw_text"]:
             articles.append(article)

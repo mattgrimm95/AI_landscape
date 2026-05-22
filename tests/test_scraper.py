@@ -77,9 +77,10 @@ class ScraperTest(unittest.TestCase):
         self.assertEqual(articles[0]["title"], "Atom Title")
         self.assertEqual(articles[0]["url"], "https://atom.example/1")
 
-    def test_invalid_xml_raises_feed_error(self):
-        with self.assertRaises(scraper.FeedError):
-            scraper.parse_feed("not xml at all", "Bad")
+    def test_unparseable_input_yields_no_articles(self):
+        # feedparser tolerates malformed input — it recovers whatever entries
+        # it can, which for pure garbage is none.
+        self.assertEqual(scraper.parse_feed("not xml at all", "Bad"), [])
 
 
 if __name__ == "__main__":

@@ -202,3 +202,27 @@ A high-level record of steps taken and decisions made while implementing the
   clean trafilatura extraction (the rest fell back to feed content — blocked
   or empty pages). Median document length rose to ~4,500 characters.
   25,016 entities -> 5,628 nodes, 116,929 edges.
+
+## 2026-05-22 — feedparser, and a spaCy NER measurement
+
+### feedparser
+- Replaced the hand-rolled `ElementTree` feed parsing with `feedparser`,
+  removing ~40 lines (`_strip_namespaces`, `_text_of`, `_link_of`) and
+  tolerating malformed feeds instead of crashing on them. `pip` itself was
+  also upgraded (21.1.1 -> 26.0.1).
+
+### spaCy — measured, not adopted as default
+- The latest spaCy (3.8) dropped Python 3.9 support, so `spacy<3.8` (3.7.5)
+  plus `en_core_web_sm` were installed.
+- Rebuild measurement on the 378-document corpus:
+  - rule:  ~5 s  -> 25,016 entities, 5,628 nodes, 116,929 edges
+  - spaCy: ~58 s -> 21,394 entities, 6,601 nodes,  98,409 edges
+- spaCy types every node (no "misc" bucket) and finds more distinct
+  entities, but it returns raw surface forms — losing the gazetteer's
+  canonicalization ("U.S." and "The United States" become separate nodes) —
+  and the small model mislabels some organizations as people. Neither
+  backend is a clear win; a gazetteer + spaCy hybrid would be.
+- Decision: the rule backend stays the default. The default is now an
+  explicit setting (`config.DEFAULT_NER_BACKEND`) rather than being inferred
+  from whichever package is installed — installing spaCy must not silently
+  change pipeline behaviour. spaCy is available on demand via `--ner spacy`.
