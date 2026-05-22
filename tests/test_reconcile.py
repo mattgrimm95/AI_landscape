@@ -49,6 +49,46 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(n("drone swarms"), n("drone swarm"))  # plural
         self.assertEqual(n("F-35s"), n("F-35"))
 
+    def test_normalize_strips_leading_article(self):
+        n = reconcile.normalize
+        # A leading article ("the"/"a"/"an") is an NER span artifact, so the
+        # article variant must share a dedup key with the bare form.
+        self.assertEqual(
+            n("a National Science Foundation"),
+            n("National Science Foundation"),
+        )
+        self.assertEqual(n("an Institute for Data"), n("Institute for Data"))
+        self.assertEqual(
+            n("the Naval Surface Warfare Center"),
+            n("Naval Surface Warfare Center"),
+        )
+        # A word that merely begins with those letters is left intact.
+        self.assertEqual(n("Antarctica"), "antarctica")
+        self.assertEqual(n("Apple"), "apple")
+        self.assertEqual(n("Andorra"), "andorra")
+
+    def test_leading_article_merges_node_and_cleans_display(self):
+        # NER sometimes swallows a leading article into the entity span.
+        # The article variant is seen first, so a stale display name would
+        # surface here as "a National Science Foundation".
+        self._add_doc(
+            "h1",
+            [{"text": "a National Science Foundation", "label": "organization"}],
+        )
+        self._add_doc(
+            "h2",
+            [{"text": "National Science Foundation", "label": "organization"}],
+        )
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # The article variant collapses onto the bare-form node...
+        self.assertEqual(summary["nodes"], 1)
+        node = self.kg.node_by_alias("national science foundation")
+        self.assertIsNotNone(node)
+        self.assertEqual(node["mention_count"], 2)
+        self.assertEqual(node["document_count"], 2)
+        # ...and the display name carries no leading-article artifact.
+        self.assertEqual(node["canonical_name"], "National Science Foundation")
+
     def test_dedup_and_edges(self):
         self._seed()
         summary = reconcile.reconcile(self.documents, self.ner, self.kg)
