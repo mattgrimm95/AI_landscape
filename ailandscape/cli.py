@@ -2,10 +2,10 @@
 
 Usage:
     python -m ailandscape.cli run        scrape new documents, then rebuild
-    python -m ailandscape.cli rebuild    rebuild both databases from the corpus
+    python -m ailandscape.cli rebuild    rebuild the NER log + graph from the corpus
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
-    python -m ailandscape.cli snapshot   export both databases to snapshots/
+    python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
 
 The corpus (corpus/documents.jsonl) is the source of truth; `rebuild`
@@ -22,7 +22,7 @@ import tempfile
 from . import config, corpus, pipeline, reconcile, scraper
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
-from .storage_raw import RawLogStore
+from .storage_ner import NEROutputLog
 
 SAMPLE_FEED = config.ROOT / "samples" / "sample_feed.xml"
 CORRECTIONS_FILE = config.ROOT / "corrections.json"
@@ -34,41 +34,41 @@ def _log(msg):
 
 def _open_stores():
     config.ensure_dirs()
-    return RawLogStore(config.RAW_LOG_DB), KnowledgeGraphStore(config.KG_DB)
+    return NEROutputLog(config.NER_OUTPUT_DB), KnowledgeGraphStore(config.KG_DB)
 
 
 def cmd_run(args):
-    raw, kg = _open_stores()
+    ner_log, kg = _open_stores()
     try:
         result = pipeline.run(
             feeds_mod.FEEDS,
             config.CORPUS_FILE,
-            raw,
+            ner_log,
             kg,
             ner_backend=args.ner,
             corrections=reconcile.load_corrections(CORRECTIONS_FILE),
             log=_log,
         )
     finally:
-        raw.close()
+        ner_log.close()
         kg.close()
     print(json.dumps(result, indent=2))
     return 0
 
 
 def cmd_rebuild(args):
-    raw, kg = _open_stores()
+    ner_log, kg = _open_stores()
     try:
         result = pipeline.rebuild(
             config.CORPUS_FILE,
-            raw,
+            ner_log,
             kg,
             ner_backend=args.ner,
             corrections=reconcile.load_corrections(CORRECTIONS_FILE),
             log=_log,
         )
     finally:
-        raw.close()
+        ner_log.close()
         kg.close()
     print(json.dumps(result, indent=2))
     return 0
@@ -81,12 +81,12 @@ def cmd_demo(args):
     corpus_path = os.path.join(tmp, "documents.jsonl")
     for article in scraper.scrape_fixture(SAMPLE_FEED, "Sample Feed"):
         corpus.append(corpus_path, pipeline.make_record(article))
-    raw = RawLogStore(os.path.join(tmp, "raw_log.db"))
+    ner_log = NEROutputLog(os.path.join(tmp, "ner_output_log.db"))
     kg = KnowledgeGraphStore(os.path.join(tmp, "knowledge_graph.db"))
     try:
-        result = pipeline.rebuild(corpus_path, raw, kg, ner_backend=args.ner, log=_log)
+        result = pipeline.rebuild(corpus_path, ner_log, kg, ner_backend=args.ner, log=_log)
     finally:
-        raw.close()
+        ner_log.close()
         kg.close()
     print(json.dumps(result, indent=2))
     print("demo ran in %s (real data untouched)" % tmp)
@@ -94,16 +94,13 @@ def cmd_demo(args):
 
 
 def cmd_stats(_args):
-    raw, kg = _open_stores()
+    ner_log, kg = _open_stores()
     try:
         print(
             "Corpus:   %d documents  (%s)"
             % (corpus.count(config.CORPUS_FILE), config.CORPUS_FILE)
         )
-        print(
-            "Raw log:  %d documents, %d entities"
-            % (raw.count_documents(), raw.count_entities())
-        )
+        print("NER log:  %d entities" % ner_log.count_entities())
         print(
             "Graph:    %d nodes, %d edges"
             % (kg.count_nodes(), kg.count_edges())
@@ -122,22 +119,20 @@ def cmd_stats(_args):
                     )
                 )
     finally:
-        raw.close()
+        ner_log.close()
         kg.close()
     return 0
 
 
 def cmd_snapshot(_args):
-    raw, kg = _open_stores()
+    ner_log, kg = _open_stores()
     try:
         snapshot = {
             "created_at": datetime.datetime.now(
                 datetime.timezone.utc
             ).isoformat(),
-            "raw_log": {
-                "documents": raw.documents(),
-                "entities": raw.all_entities(),
-            },
+            "corpus": {"documents": corpus.load(config.CORPUS_FILE)},
+            "ner_output": {"entities": ner_log.all_entities()},
             "knowledge_graph": {
                 "nodes": kg.nodes(),
                 "aliases": kg.aliases(),
@@ -145,7 +140,7 @@ def cmd_snapshot(_args):
             },
         }
     finally:
-        raw.close()
+        ner_log.close()
         kg.close()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = config.SNAPSHOT_DIR / ("snapshot-%s.json" % stamp)
@@ -164,7 +159,7 @@ def cmd_reset(args):
             file=sys.stderr,
         )
         return 1
-    for db_path in (config.RAW_LOG_DB, config.KG_DB):
+    for db_path in (config.NER_OUTPUT_DB, config.KG_DB):
         if db_path.exists():
             db_path.unlink()
             print("deleted %s" % db_path)
@@ -186,7 +181,7 @@ def build_parser():
     run_p.set_defaults(func=cmd_run)
 
     rebuild_p = sub.add_parser(
-        "rebuild", help="rebuild both databases from the corpus (no network)"
+        "rebuild", help="rebuild the NER log and graph from the corpus"
     )
     rebuild_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
     rebuild_p.set_defaults(func=cmd_rebuild)
@@ -199,7 +194,7 @@ def build_parser():
         func=cmd_stats
     )
     sub.add_parser(
-        "snapshot", help="export both databases to snapshots/"
+        "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)
 
     reset_p = sub.add_parser(

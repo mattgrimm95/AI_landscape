@@ -1,9 +1,9 @@
 """Orchestrates the full app_plan flow.
 
 The corpus (`corpus/documents.jsonl`) is the version-controlled source of
-truth. `run` scrapes new documents into the corpus; `rebuild` regenerates
-both SQLite databases from the corpus deterministically — the same corpus
-always yields the same raw log and the same knowledge graph.
+truth. `run` scrapes new documents into the corpus; `rebuild` regenerates the
+NER output log and the knowledge graph from the corpus deterministically —
+the same corpus always yields the same outputs.
 """
 
 import datetime
@@ -65,70 +65,55 @@ def scrape_into_corpus(feeds, corpus_path, log=None):
     return {"fetched": len(articles), "added": added}
 
 
-def ingest_articles(articles, raw_store, ner_backend=None, log=None):
-    """Steps 2-3: run NER on each article and write it to the raw log."""
-    log = log or (lambda *_a: None)
-    new_documents = 0
-    skipped = 0
-    entities = 0
-    for article in articles:
-        content_hash = (
-            article.get("content_hash") or scraper.content_hash(article)
-        )
-        doc_id, is_new = raw_store.add_document(article, content_hash)
-        if not is_new:
-            skipped += 1
-            continue
-        text = (
-            article.get("title", "") + ". " + article.get("raw_text", "")
-        ).strip()
-        extracted = ner.extract(text, backend=ner_backend)
-        raw_store.add_entities(doc_id, extracted)
-        new_documents += 1
-        entities += len(extracted)
-    log("ingested %d documents (%d entities)" % (new_documents, entities))
-    return {
-        "new_documents": new_documents,
-        "skipped": skipped,
-        "entities": entities,
-    }
-
-
 def rebuild(
-    corpus_path, raw_store, kg_store, ner_backend=None, corrections=None, log=None
+    corpus_path, ner_log, kg_store, ner_backend=None, corrections=None, log=None
 ):
-    """Regenerate both databases from the corpus (steps 2-5).
+    """Regenerate the NER output log and knowledge graph from the corpus
+    (steps 2-5).
 
-    Deterministic: the same corpus always produces the same raw log and the
+    Deterministic: the same corpus always produces the same NER log and the
     same knowledge graph.
     """
     log = log or (lambda *_a: None)
     documents = corpus.load(corpus_path)
-    raw_store.clear()
-    ingest = ingest_articles(
-        documents, raw_store, ner_backend=ner_backend, log=log
+    ner_log.clear()
+    entity_count = 0
+    for doc in documents:
+        text = (
+            doc.get("title", "") + ". " + doc.get("raw_text", "")
+        ).strip()
+        extracted = ner.extract(text, backend=ner_backend)
+        ner_log.add_entities(doc["content_hash"], extracted)
+        entity_count += len(extracted)
+    log(
+        "ran NER on %d documents (%d entities)"
+        % (len(documents), entity_count)
     )
     graph = reconcile.reconcile(
-        raw_store, kg_store, corrections=corrections, log=log
+        documents, ner_log, kg_store, corrections=corrections, log=log
     )
-    return {"documents": len(documents), "ingest": ingest, "graph": graph}
+    return {
+        "documents": len(documents),
+        "entities": entity_count,
+        "graph": graph,
+    }
 
 
 def run(
     feeds,
     corpus_path,
-    raw_store,
+    ner_log,
     kg_store,
     ner_backend=None,
     corrections=None,
     log=None,
 ):
-    """Run the entire flow: scrape into the corpus, then rebuild the databases."""
+    """Run the entire flow: scrape into the corpus, then rebuild everything."""
     log = log or (lambda *_a: None)
     scrape = scrape_into_corpus(feeds, corpus_path, log=log)
     rebuilt = rebuild(
         corpus_path,
-        raw_store,
+        ner_log,
         kg_store,
         ner_backend=ner_backend,
         corrections=corrections,
@@ -137,6 +122,6 @@ def run(
     return {
         "scrape": scrape,
         "documents": rebuilt["documents"],
-        "ingest": rebuilt["ingest"],
+        "entities": rebuilt["entities"],
         "graph": rebuilt["graph"],
     }

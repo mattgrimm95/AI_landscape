@@ -120,3 +120,27 @@ A high-level record of steps taken and decisions made while implementing the
   are byte-identical before and after a `rebuild` from the same corpus.
 - Test suite expanded to 31 tests, including corpus round-trip and a
   rebuild-determinism check; all passing.
+
+## 2026-05-21 — NER output log refactor
+
+### Why
+- After the corpus became the source of truth, `raw_log.db` was no longer a
+  source of truth — just a derived cache. Its `documents` table was a near
+  exact duplicate of the corpus, which is redundant.
+
+### Change
+- Renamed `raw_log.db` -> `ner_output_log.db` (module `storage_raw.py` ->
+  `storage_ner.py`, class `RawLogStore` -> `NEROutputLog`).
+- **Dropped the `documents` table.** The store now holds only the `entities`
+  table — raw NER output keyed by the corpus document's `content_hash`.
+- Dropped the `extracted_at` column (the corpus already records `fetched_at`).
+- `reconcile` now takes the corpus document list plus the NER log and joins
+  them on `content_hash`; `pipeline.rebuild` runs NER straight into the log.
+- Net effect: one clear chain — corpus (source of truth) -> NER output log
+  (entity cache) -> knowledge graph — with no duplicated document storage.
+
+### Verification
+- All 31 tests updated and passing.
+- Behaviour preserved: `demo` still yields 18 nodes / 49 edges, and a
+  `rebuild` from the existing 81-document corpus still yields 1,786 nodes /
+  27,912 edges — identical to before the refactor.

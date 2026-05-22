@@ -1,8 +1,9 @@
 """Step 4 of the flow: filter / de-duplicate / reconcile / relationship links.
 
-Reads the append-only raw log and rebuilds the knowledge graph (step 5):
-raw entity mentions are normalized, de-duplicated into canonical nodes via an
-alias index, and linked by co-occurrence edges (entities sharing a document).
+Builds the knowledge graph (step 5) from the corpus documents and the NER
+output log: raw entity mentions are normalized, de-duplicated into canonical
+nodes via an alias index, and linked by co-occurrence edges (entities sharing
+a document).
 """
 
 import itertools
@@ -56,21 +57,23 @@ def load_corrections(path):
     return merge, ignore
 
 
-def reconcile(raw_store, kg_store, corrections=None, log=None):
-    """Rebuild the knowledge graph from the raw log. Returns a summary dict."""
+def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
+    """Build the knowledge graph from the corpus documents and NER log.
+
+    `documents` is the list of corpus document records; `ner_log` supplies the
+    raw entities for each, keyed by `content_hash`. Returns a summary dict.
+    """
     log = log or (lambda *_a: None)
     merge, ignore = corrections if corrections else ({}, set())
     ignore = set(ignore) | _DEFAULT_IGNORE
-
-    documents = raw_store.documents()
 
     # Pass 1: cache each document's entities and count document frequency —
     # how many distinct documents mention each normalized alias.
     doc_entities = {}
     doc_freq = {}
     for doc in documents:
-        ents = raw_store.entities_for(doc["id"])
-        doc_entities[doc["id"]] = ents
+        ents = ner_log.entities_for(doc["content_hash"])
+        doc_entities[doc["content_hash"]] = ents
         for alias in {normalize(e["text"]) for e in ents}:
             if alias:
                 doc_freq[alias] = doc_freq.get(alias, 0) + 1
@@ -111,7 +114,7 @@ def reconcile(raw_store, kg_store, corrections=None, log=None):
     for doc in documents:
         doc_date = doc.get("fetched_at") or ""
         doc_keys = set()
-        for entity in doc_entities[doc["id"]]:
+        for entity in doc_entities[doc["content_hash"]]:
             resolved = resolve(entity)
             if resolved is None:
                 continue
@@ -129,7 +132,7 @@ def reconcile(raw_store, kg_store, corrections=None, log=None):
                 }
                 nodes[key] = node
             node["mentions"] += 1
-            node["docs"].add(doc["id"])
+            node["docs"].add(doc["content_hash"])
             node["aliases"].add(alias)
             node["aliases"].add(key)
             if node["type"] == "misc" and etype != "misc":

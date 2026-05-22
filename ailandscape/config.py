@@ -11,7 +11,7 @@ CORPUS_DIR = ROOT / "corpus"
 # documents. Both SQLite databases are derived caches rebuilt from this file.
 CORPUS_FILE = CORPUS_DIR / "documents.jsonl"
 
-RAW_LOG_DB = DATA_DIR / "raw_log.db"
+NER_OUTPUT_DB = DATA_DIR / "ner_output_log.db"
 KG_DB = DATA_DIR / "knowledge_graph.db"
 
 HTTP_USER_AGENT = (
