@@ -1,7 +1,9 @@
-"""Step 1 of the flow: scrape web pages from RSS/Atom feeds.
+"""Step 1 of the flow: scrape articles.
 
-Parsing uses only the standard library (`urllib`, `xml.etree`) plus
-BeautifulSoup for turning embedded HTML into plain text.
+Feeds (RSS/Atom) are parsed for article links and metadata; each article
+page is then fetched and its main text extracted with trafilatura, which
+strips navigation, ads, captions, and other boilerplate. If an article page
+cannot be fetched or extracted, the feed's embedded content is used instead.
 """
 
 import hashlib
@@ -94,10 +96,12 @@ def parse_feed(raw, source_name):
 
 
 def content_hash(article):
-    """Stable hash identifying an article, used for de-duplication."""
-    payload = "|".join(
-        [article.get("url", ""), article.get("title", ""), article.get("raw_text", "")]
-    )
+    """Stable id for an article, derived from its URL and title.
+
+    The body text is deliberately excluded so a document can be de-duplicated
+    (and skipped) before its page is fetched.
+    """
+    payload = "|".join([article.get("url", ""), article.get("title", "")])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -112,6 +116,42 @@ def fetch_feed(feed):
     except Exception as exc:  # network/HTTP errors vary widely
         raise FeedError("could not fetch %s: %s" % (feed["url"], exc)) from exc
     return parse_feed(raw, feed["name"])[:MAX_ARTICLES_PER_FEED]
+
+
+def extract_text_from_html(html, fallback=""):
+    """Extract an article's main text from page HTML using trafilatura.
+
+    trafilatura strips navigation, ads, captions, and other boilerplate.
+    Returns `fallback` if trafilatura is unavailable or finds no usable text.
+    """
+    if not html:
+        return fallback
+    try:
+        import trafilatura
+    except ImportError:
+        return fallback
+    try:
+        text = trafilatura.extract(
+            html, include_comments=False, favor_precision=True
+        )
+    except Exception:
+        return fallback
+    return text or fallback
+
+
+def extract_article(url, fallback=""):
+    """Fetch an article page and return its clean main text.
+
+    Falls back to `fallback` (typically the feed's embedded content) if the
+    page cannot be fetched or no main text can be extracted.
+    """
+    if not url:
+        return fallback
+    try:
+        html = _fetch_url(url)
+    except Exception:  # network/HTTP errors vary widely
+        return fallback
+    return extract_text_from_html(html, fallback=fallback)
 
 
 def scrape_fixture(path, source_name):

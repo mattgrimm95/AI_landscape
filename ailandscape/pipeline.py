@@ -7,8 +7,12 @@ the same corpus always yields the same outputs.
 """
 
 import datetime
+import time
 
 from . import corpus, ner, reconcile, scraper
+
+# Polite pause between article-page fetches during scraping.
+ARTICLE_FETCH_DELAY = 1.0
 
 
 def _utcnow():
@@ -48,21 +52,35 @@ def fetch_all(feeds, log=None):
 
 
 def scrape_into_corpus(feeds, corpus_path, log=None):
-    """Step 1: fetch feeds and append previously unseen documents to the
-    corpus — the durable, version-controlled source of truth."""
+    """Step 1: fetch feeds, then for each previously unseen article fetch its
+    page, extract the clean main text, and append it to the corpus.
+
+    Articles are de-duplicated by URL+title *before* their pages are fetched,
+    so known articles are never re-downloaded.
+    """
     log = log or (lambda *_a: None)
     articles = fetch_all(feeds, log=log)
     known = corpus.hashes(corpus_path)
     added = 0
+    extracted = 0
     for article in articles:
-        record = make_record(article)
-        if record["content_hash"] in known:
+        chash = scraper.content_hash(article)
+        if chash in known:
             continue
-        corpus.append(corpus_path, record)
-        known.add(record["content_hash"])
+        known.add(chash)
+        # New article: fetch its page and extract the clean main text,
+        # falling back to the feed's embedded content if that fails.
+        feed_text = article.get("raw_text", "")
+        article["raw_text"] = scraper.extract_article(
+            article["url"], fallback=feed_text
+        )
+        if article["raw_text"] != feed_text:
+            extracted += 1
+        corpus.append(corpus_path, make_record(article))
         added += 1
         log("corpus += %s" % article.get("title", "")[:70])
-    return {"fetched": len(articles), "added": added}
+        time.sleep(ARTICLE_FETCH_DELAY)
+    return {"fetched": len(articles), "added": added, "extracted": extracted}
 
 
 def rebuild(

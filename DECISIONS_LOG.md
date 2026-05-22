@@ -174,3 +174,31 @@ A high-level record of steps taken and decisions made while implementing the
 - Recreated the corpus from scratch (deleted and rebuilt): 378 documents
   across the 12 feeds (213 defense / 165 public) -> 18,495 entities ->
   4,573 graph nodes, 72,167 edges.
+
+## 2026-05-22 — Per-article extraction with trafilatura
+
+### Why
+- The scraper only parsed RSS/Atom feeds and took whatever they embedded —
+  often just a teaser, and always carrying boilerplate (photo credits,
+  "appeared first on …", author contact lines) that polluted NER.
+
+### Change
+- `pip` could not reach PyPI: its bundled `certifi` lacked CA roots present
+  in the Windows trust store. Fixed by installing with `--cert` pointed at an
+  exported Windows CA bundle — TLS verification stays fully on (no
+  `--trusted-host` bypass). The bundle was a one-off and has been deleted.
+- Added `trafilatura` (+ `lxml_html_clean`). The scraper now fetches each
+  article's own page and extracts the main text with trafilatura, which
+  strips navigation, ads, captions, and footers. The feed's embedded content
+  is the fallback when a page cannot be fetched or extracted.
+- De-duplication is now by URL+title (`content_hash` no longer includes body
+  text), so a known article is skipped *before* its page is fetched.
+- A 1s polite delay separates article-page fetches.
+- Fixed a Windows crash: a `print` of a title containing characters outside
+  cp1252 killed the run; the CLI now forces UTF-8 stdout/stderr.
+
+### Result
+- Recreated corpus: 378 documents; 278 of the 354 freshly scraped docs got
+  clean trafilatura extraction (the rest fell back to feed content — blocked
+  or empty pages). Median document length rose to ~4,500 characters.
+  25,016 entities -> 5,628 nodes, 116,929 edges.

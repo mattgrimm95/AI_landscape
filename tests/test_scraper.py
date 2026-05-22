@@ -1,8 +1,10 @@
+import importlib.util
 import unittest
 
 from ailandscape import config, scraper
 
 SAMPLE = config.ROOT / "samples" / "sample_feed.xml"
+_HAS_TRAFILATURA = importlib.util.find_spec("trafilatura") is not None
 
 
 class ScraperTest(unittest.TestCase):
@@ -23,15 +25,43 @@ class ScraperTest(unittest.TestCase):
         )
         self.assertEqual(scraper.html_to_text(""), "")
 
-    def test_content_hash_is_stable_and_distinct(self):
+    def test_content_hash_uses_url_and_title_only(self):
         article = {"url": "u", "title": "t", "raw_text": "x"}
+        # Body text does not affect the hash, so an article can be
+        # de-duplicated before its page is fetched.
         self.assertEqual(
-            scraper.content_hash(article), scraper.content_hash(dict(article))
+            scraper.content_hash(article),
+            scraper.content_hash(dict(article, raw_text="completely different")),
         )
-        changed = dict(article, title="different")
+        # URL or title changes do produce a different hash.
         self.assertNotEqual(
-            scraper.content_hash(article), scraper.content_hash(changed)
+            scraper.content_hash(article),
+            scraper.content_hash(dict(article, title="different")),
         )
+        self.assertNotEqual(
+            scraper.content_hash(article),
+            scraper.content_hash(dict(article, url="other")),
+        )
+
+    def test_extract_text_from_html_empty_returns_fallback(self):
+        self.assertEqual(scraper.extract_text_from_html("", "FALLBACK"), "FALLBACK")
+
+    @unittest.skipUnless(_HAS_TRAFILATURA, "trafilatura not installed")
+    def test_extract_text_from_html_drops_boilerplate(self):
+        html = (
+            "<html><body>"
+            "<nav>Home About Subscribe Login</nav>"
+            "<article><h1>Defense AI Update</h1>"
+            "<p>The Pentagon awarded a major contract to develop autonomous "
+            "drones for reconnaissance missions across multiple theaters.</p>"
+            "<p>Officials said the program will run for several years and "
+            "involve close cooperation with allied nations.</p></article>"
+            "<footer>Copyright 2026 Example News. Contact webmaster@example.com.</footer>"
+            "</body></html>"
+        )
+        text = scraper.extract_text_from_html(html, fallback="FALLBACK")
+        self.assertIn("Pentagon awarded a major contract", text)
+        self.assertNotIn("webmaster@example.com", text)
 
     def test_parse_atom_feed(self):
         atom = (

@@ -209,6 +209,14 @@ def build_parser():
 
 
 def main(argv=None):
+    # Force UTF-8 output so a print of text containing characters outside the
+    # platform default encoding (common on Windows with a redirected stdout)
+    # can never crash the run.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     args = build_parser().parse_args(argv)
     return args.func(args)
 
