@@ -160,3 +160,17 @@ A high-level record of steps taken and decisions made while implementing the
 - Chose Windows Task Scheduler over a cloud scheduled agent: the job is a
   fixed, deterministic command that needs no AI reasoning, so a local
   cron-style task is free, has no billing question, and is the right tool.
+
+## 2026-05-21 — AI-focused feeds and corpus recreation
+
+- Replaced the 3 general feeds with **12 AI-focused feeds**, each verified to
+  return a parseable RSS/Atom feed. Split **8 national-defense : 4 public AI
+  = 2:1** by feed count, as requested. The public set includes MIT News (AI
+  topic feed) and the Stanford AI Lab blog.
+- Added `scraper.MAX_ARTICLES_PER_FEED` (50): only the 50 most-recent entries
+  of any feed are kept, so one large feed cannot dominate the corpus. This
+  was necessary — OpenAI's feed alone returned 971 entries, which uncapped
+  would have flooded the corpus and wrecked the intended defense focus.
+- Recreated the corpus from scratch (deleted and rebuilt): 378 documents
+  across the 12 feeds (213 defense / 165 public) -> 18,495 entities ->
+  4,573 graph nodes, 72,167 edges.

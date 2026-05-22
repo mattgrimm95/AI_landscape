@@ -12,6 +12,10 @@ from bs4 import BeautifulSoup
 
 from . import config
 
+# Cap on how many (most recent) entries to keep from a single feed, so one
+# large feed cannot dominate the corpus.
+MAX_ARTICLES_PER_FEED = 50
+
 
 class FeedError(Exception):
     """Raised when a feed cannot be fetched or parsed."""
@@ -98,12 +102,16 @@ def content_hash(article):
 
 
 def fetch_feed(feed):
-    """Fetch and parse a live feed. `feed` is a dict with 'name' and 'url'."""
+    """Fetch and parse a live feed. `feed` is a dict with 'name' and 'url'.
+
+    Only the most recent MAX_ARTICLES_PER_FEED entries are kept so a single
+    large feed cannot dominate the corpus.
+    """
     try:
         raw = _fetch_url(feed["url"])
     except Exception as exc:  # network/HTTP errors vary widely
         raise FeedError("could not fetch %s: %s" % (feed["url"], exc)) from exc
-    return parse_feed(raw, feed["name"])
+    return parse_feed(raw, feed["name"])[:MAX_ARTICLES_PER_FEED]
 
 
 def scrape_fixture(path, source_name):
