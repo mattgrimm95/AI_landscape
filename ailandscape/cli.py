@@ -5,6 +5,7 @@ Usage:
     python -m ailandscape.cli rebuild    rebuild the NER log + graph from the corpus
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
+    python -m ailandscape.cli overview   print a statistical overview of the data
     python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
 
@@ -19,7 +20,7 @@ import os
 import sys
 import tempfile
 
-from . import config, corpus, pipeline, reconcile, scraper
+from . import config, corpus, pipeline, reconcile, report, scraper
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -124,6 +125,22 @@ def cmd_stats(_args):
     return 0
 
 
+def cmd_overview(_args):
+    ner_log, kg = _open_stores()
+    try:
+        documents = corpus.load(config.CORPUS_FILE)
+        text = report.render_overview(
+            report.build_overview(
+                documents, ner_log, kg, config.RUN_HISTORY_FILE
+            )
+        )
+    finally:
+        ner_log.close()
+        kg.close()
+    print(text)
+    return 0
+
+
 def cmd_snapshot(_args):
     ner_log, kg = _open_stores()
     try:
@@ -197,6 +214,9 @@ def build_parser():
     sub.add_parser("stats", help="show corpus and database statistics").set_defaults(
         func=cmd_stats
     )
+    sub.add_parser(
+        "overview", help="print a statistical overview of the data"
+    ).set_defaults(func=cmd_overview)
     sub.add_parser(
         "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)

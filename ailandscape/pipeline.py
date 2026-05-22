@@ -7,9 +7,10 @@ the same corpus always yields the same outputs.
 """
 
 import datetime
+import json
 import time
 
-from . import corpus, ner, reconcile, scraper
+from . import config, corpus, ner, reconcile, scraper
 
 # Polite pause between article-page fetches during scraping.
 ARTICLE_FETCH_DELAY = 1.0
@@ -117,6 +118,24 @@ def rebuild(
     }
 
 
+def _record_run(result, scrape_seconds, rebuild_seconds):
+    """Append a timing + counts record for this run to the run-history log."""
+    record = {
+        "finished_at": _utcnow(),
+        "scrape_seconds": round(scrape_seconds, 1),
+        "rebuild_seconds": round(rebuild_seconds, 1),
+        "fetched": result["scrape"]["fetched"],
+        "added": result["scrape"]["added"],
+        "documents": result["documents"],
+        "entities": result["entities"],
+        "nodes": result["graph"]["nodes"],
+        "edges": result["graph"]["edges"],
+    }
+    config.RUN_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with config.RUN_HISTORY_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
+
+
 def run(
     feeds,
     corpus_path,
@@ -126,9 +145,16 @@ def run(
     corrections=None,
     log=None,
 ):
-    """Run the entire flow: scrape into the corpus, then rebuild everything."""
+    """Run the entire flow: scrape into the corpus, then rebuild everything.
+
+    Records the run's timing and counts to the run-history log.
+    """
     log = log or (lambda *_a: None)
+    started = time.time()
     scrape = scrape_into_corpus(feeds, corpus_path, log=log)
+    scrape_seconds = time.time() - started
+
+    started = time.time()
     rebuilt = rebuild(
         corpus_path,
         ner_log,
@@ -137,9 +163,13 @@ def run(
         corrections=corrections,
         log=log,
     )
-    return {
+    rebuild_seconds = time.time() - started
+
+    result = {
         "scrape": scrape,
         "documents": rebuilt["documents"],
         "entities": rebuilt["entities"],
         "graph": rebuilt["graph"],
     }
+    _record_run(result, scrape_seconds, rebuild_seconds)
+    return result

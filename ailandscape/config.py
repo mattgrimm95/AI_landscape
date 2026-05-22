@@ -14,6 +14,10 @@ CORPUS_FILE = CORPUS_DIR / "documents.jsonl"
 NER_OUTPUT_DB = DATA_DIR / "ner_output_log.db"
 KG_DB = DATA_DIR / "knowledge_graph.db"
 
+# Append-only log of pipeline runs (timing + counts), used by the overview
+# report. Derived data — lives under the gitignored data/ directory.
+RUN_HISTORY_FILE = DATA_DIR / "run_history.jsonl"
+
 HTTP_USER_AGENT = (
     "AILandscapeBot/0.1 (research project; "
     "+https://github.com/mattgrimm95/AI_landscape)"

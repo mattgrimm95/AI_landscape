@@ -248,3 +248,18 @@ A high-level record of steps taken and decisions made while implementing the
   "F-35").
 - Default ignore terms are normalized before matching so they keep working
   under the new normalization.
+
+## 2026-05-22 — Statistical overview report (first attempt)
+
+- Added `report.py` and an `overview` CLI command: a readable statistical
+  summary of the pipeline data — the funnel (articles -> raw mentions ->
+  nodes -> edges), scrape recency / "scraped in the last 24h", scrape
+  duration, entity- and relationship-type breakdowns, the most prominent and
+  most-connected entities, and data-quality signals (single-mention nodes,
+  possible partial-name duplicates).
+- `pipeline.run` now records each run's timing and counts to
+  `data/run_history.jsonl`; the overview reports the latest run.
+- First-attempt findings on the 378-document corpus: 22,091 raw mentions
+  collapse to 6,000 nodes, but ~69% of nodes are single-mention (long tail /
+  noise) and ~277 look like partial-name duplicates — both point at
+  entity-resolution as the next improvement (tracked in TODO).
