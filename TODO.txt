@@ -1,5 +1,5 @@
 * Include military focused datasource streams like SAM.gov and SBIR/STTR submissions and winners. Still focus on AI projects and writing only. [not done: SAM.gov needs an API key and these are API sources, not RSS feeds -- a separate non-RSS scraper.]
-* create better relationships/links to give more information found within and between articles such as "is_subordinate_to" for sub-organizations and "is_same_organization" for people who work together. [not done: needs relation extraction beyond co-occurrence -- a larger NLP task.]
+[done] * create better relationships/links to give more information found within and between articles such as "is_subordinate_to" for sub-organizations and "is_same_organization" for people who work together. -- resolved: ailandscape/relations.py extracts 8 directed, type-constrained typed relations (leads, part_of, located_in, acquires, partners_with, awards_contract, develops, supplies) from cue phrases; "part_of" covers sub-organizations and "leads" links people to the orgs they run.
 * Acronym coreference (an acronym and its written-out expansion). [not done with coreference: initials matching is too false-positive prone without article-text context.]
 [done] * Add Claude Preview to allow permissions in settings.
 [done] * In-GUI correction editing -- resolved: the web app has merge/ignore buttons that POST to /api/correct.

@@ -55,3 +55,12 @@ def append(path, document):
 
 def count(path):
     return len(load(path))
+
+
+def document_text(doc):
+    """The text NER and relation extraction operate on: title + body.
+
+    Defined once so the entity offsets recorded by NER stay valid for the
+    relation extractor, which works on the same string.
+    """
+    return (doc.get("title", "") + ". " + doc.get("raw_text", "")).strip()

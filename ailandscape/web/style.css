@@ -116,6 +116,7 @@ ul.neighbors li {
 }
 ul.neighbors li:hover { background: var(--panel); }
 ul.neighbors li em { color: var(--muted); font-style: normal; }
+ul.neighbors li em.rel { color: #a8c8ff; font-size: 11px; }
 
 .stat {
   display: flex;

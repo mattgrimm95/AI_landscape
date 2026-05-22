@@ -40,6 +40,8 @@
 * Create a TODO file to easily draft new commands while other commands are running. Add most recent to top. Mark done items with "[done]".
 * Bias libraries to most recent versions.
 * Natural Law coding: always keep in mind the ultimate goals and essential features of applications. Orient toward the goals and prioritize what is essential. Ask if uncertain about the ultimate goals, but make sure to immediately ask if needed.
+* Aim for full stack development including a front-end and back-end when building applications.
+* Highly value average User Experience.
 
 ## Project Characteristics
 
@@ -50,4 +52,4 @@ extensibility
 reverted if something genuinely destructive happens
 * Don't take genuinely destructive actions unless explicitly and clearly
 initiated through a prompt from a human
-
+* Focused on Artificial Intelligence (AI) information and knowledge.

@@ -65,7 +65,8 @@ def select_subgraph(
             raise ValueError("no entity matching %r" % focus)
         neighbor_weight = {}
         for edge in edges:
-            if edge["weight"] < min_weight:
+            # Typed semantic edges always count; co-occurrence is filtered.
+            if edge["relation"] == "co_occurs_with" and edge["weight"] < min_weight:
                 continue
             other = None
             if edge["src_id"] == match["id"]:
@@ -98,7 +99,8 @@ def select_subgraph(
         for e in edges
         if e["src_id"] in keep
         and e["dst_id"] in keep
-        and e["weight"] >= min_weight
+        # Typed semantic edges always shown; co-occurrence is weight-filtered.
+        and (e["relation"] != "co_occurs_with" or e["weight"] >= min_weight)
     ]
     return sel_nodes, sel_edges
 
@@ -140,13 +142,26 @@ def render(nodes, edges, output_path, title="AI Landscape Knowledge Graph"):
         )
 
     for edge in edges:
-        net.add_edge(
-            edge["src_id"],
-            edge["dst_id"],
-            value=edge["weight"],
-            title="co-occurs in %d documents" % edge["weight"],
-            color="#3a4555",
-        )
+        if edge["relation"] == "co_occurs_with":
+            net.add_edge(
+                edge["src_id"],
+                edge["dst_id"],
+                value=edge["weight"],
+                title="co-occurs in %d documents" % edge["weight"],
+                color="#3a4555",
+            )
+        else:
+            # Typed semantic relationships: directed, labelled, and brighter.
+            label = edge["relation"].replace("_", " ")
+            net.add_edge(
+                edge["src_id"],
+                edge["dst_id"],
+                value=edge["weight"],
+                title="%s (seen %dx)" % (label, edge["weight"]),
+                label=label,
+                color="#5e9bff",
+                arrows="to",
+            )
 
     # pyvis's write_html() opens the file with the platform default encoding
     # (cp1252 on Windows) and fails on the inlined vis.js; generate the HTML

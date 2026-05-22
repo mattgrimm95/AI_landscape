@@ -38,6 +38,7 @@ def _edge_json(edge):
         "source": edge["src_id"],
         "target": edge["dst_id"],
         "weight": edge["weight"],
+        "relation": edge["relation"],
     }
 
 
@@ -97,16 +98,22 @@ def api_node(node_id: int):
         raise HTTPException(status_code=404, detail="entity not found")
     neighbors = []
     for edge in edges:
-        other = None
         if edge["src_id"] == node_id:
-            other = edge["dst_id"]
+            other, direction = edge["dst_id"], "out"
         elif edge["dst_id"] == node_id:
-            other = edge["src_id"]
-        if other is not None and other in by_id:
+            other, direction = edge["src_id"], "in"
+        else:
+            continue
+        if other in by_id:
             entry = _node_json(by_id[other])
             entry["weight"] = edge["weight"]
+            entry["relation"] = edge["relation"]
+            entry["direction"] = direction
             neighbors.append(entry)
-    neighbors.sort(key=lambda n: n["weight"], reverse=True)
+    # Typed semantic relationships first, then strongest co-occurrence.
+    neighbors.sort(
+        key=lambda n: (n["relation"] == "co_occurs_with", -n["weight"])
+    )
     return {"node": _node_json(node), "neighbors": neighbors}
 
 

@@ -112,12 +112,16 @@ function toElements(graph) {
     });
   }
   for (const e of graph.edges) {
+    const relation = e.relation || "co_occurs_with";
     elements.push({
       data: {
         id: "e" + e.id,
         source: String(e.source),
         target: String(e.target),
         w: Math.min(6, 0.8 + e.weight / 4),
+        relation: relation,
+        relLabel:
+          relation === "co_occurs_with" ? "" : relation.replace(/_/g, " "),
       },
     });
   }
@@ -148,9 +152,28 @@ const CY_STYLE = [
     style: {
       width: "data(w)",
       "line-color": "#36425a",
-      "curve-style": "haystack",
-      "haystack-radius": 0.5,
-      opacity: 0.32,
+      "curve-style": "bezier",
+      opacity: 0.3,
+    },
+  },
+  {
+    // Typed semantic relationships stand out: bright, arrowed, labelled.
+    selector: 'edge[relation != "co_occurs_with"]',
+    style: {
+      width: 2.6,
+      "line-color": "#5e9bff",
+      opacity: 0.95,
+      "target-arrow-shape": "triangle",
+      "target-arrow-color": "#5e9bff",
+      "arrow-scale": 1.1,
+      label: "data(relLabel)",
+      "font-size": 9,
+      "min-zoomed-font-size": 9,
+      color: "#a8c8ff",
+      "text-rotation": "autorotate",
+      "text-background-color": "#11151c",
+      "text-background-opacity": 0.78,
+      "text-background-padding": 2,
     },
   },
   { selector: "node:selected", style: { "border-width": 3, "border-color": "#fff" } },
@@ -221,11 +244,21 @@ function renderDetail(data) {
     "<h3>Top connections (" + data.neighbors.length + ")</h3>" +
     '<ul class="neighbors">' +
     neighbors
-      .map(
-        (x) =>
+      .map((x) => {
+        let meta;
+        if (x.relation && x.relation !== "co_occurs_with") {
+          const arrow = x.direction === "out" ? "&rarr;" : "&larr;";
+          meta =
+            '<em class="rel">' + arrow + " " +
+            escapeHtml(x.relation.replace(/_/g, " ")) + "</em>";
+        } else {
+          meta = "<em>" + x.weight + "</em>";
+        }
+        return (
           '<li data-id="' + x.id + '"><span>' + escapeHtml(x.label) +
-          "</span><em>" + x.weight + "</em></li>"
-      )
+          "</span>" + meta + "</li>"
+        );
+      })
       .join("") +
     "</ul>" +
     '<div class="row"><button data-act="focus">Focus here</button>' +
@@ -409,7 +442,7 @@ function init() {
     $("search-results").innerHTML = "";
     $("f-type").value = "";
     $("f-min-mentions").value = "0";
-    $("f-min-weight").value = "3";
+    $("f-min-weight").value = "8";
     $("f-max-nodes").value = "70";
     loadGraph(readFilters());
   });

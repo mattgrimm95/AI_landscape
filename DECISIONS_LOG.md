@@ -329,3 +329,35 @@ A high-level record of steps taken and decisions made while implementing the
 - Completed the doable TODO items. SAM.gov / SBIR data sources and typed
   semantic relationships remain in TODO — they need API keys / relation
   extraction and are larger efforts.
+
+## 2026-05-22 — Typed semantic relationships
+
+- Until now every edge was `co_occurs_with` (entities sharing a document).
+  Added `ailandscape/relations.py`, which extracts **8 directed, typed
+  relationships** from cue phrases: `leads`, `part_of`, `located_in`,
+  `acquires`, `partners_with`, `awards_contract`, `develops`, `supplies`.
+  This is the "is_subordinate_to / better links" TODO item — `part_of`
+  covers sub-organizations, `leads` links people to the orgs they run.
+- **Extraction is deliberately conservative** — precision over recall. A
+  relation is emitted only when two entities sit within 55 characters, with
+  no sentence boundary between them, a recognised cue phrase in the gap, and
+  entity types that fit the relation (e.g. `develops` needs an organization
+  subject). Wrong relationships are worse than missing ones in a knowledge
+  graph, so the rules favour fewer, trustworthy edges.
+- **Passive voice is handled**: "Anduril was awarded a contract by the
+  Pentagon" is detected as passive and the direction flipped, yielding the
+  same `(Pentagon, awards_contract, Anduril)` triple as the active form.
+  Verb cues cover irregular forms (built, produced, made).
+- **Integration**: `reconcile` collects relations per document, resolves
+  subject/object to canonical node keys (after coreference merges), tallies
+  repeats into weighted directed edges, and writes them alongside the
+  co-occurrence edges. The KG schema already keyed edges by
+  `(src, dst, relation)`, so a typed edge and a co-occurrence edge can
+  coexist between the same pair.
+- Typed edges **bypass the min-weight filter** everywhere (a single clearly
+  stated relationship is meaningful; a single co-occurrence is noise) and
+  are rendered distinctly — bright blue, arrowed, labelled — in both the
+  web app and the static `visualize` export.
+- Rebuild result: 217 typed relationships across the 378-document corpus
+  (leads 83, develops 41, awards_contract 25, partners_with 24, part_of 22,
+  supplies 19, located_in 2, acquires 1). 67 tests pass.

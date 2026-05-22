@@ -12,6 +12,8 @@ import json
 import pathlib
 import re
 
+from . import corpus, relations
+
 # Normalized aliases dropped as noise regardless of corrections.
 _DEFAULT_IGNORE = {
     "officials", "official", "reuters", "associated press",
@@ -127,9 +129,10 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             if alias:
                 doc_freq[alias] = doc_freq.get(alias, 0) + 1
 
-    nodes = {}        # key -> node accumulator
-    alias_index = {}  # normalized alias -> node key
-    edges = {}        # (key_a, key_b) -> co-occurrence weight
+    nodes = {}          # key -> node accumulator
+    alias_index = {}    # normalized alias -> node key
+    edges = {}          # (key_a, key_b) -> co-occurrence weight
+    raw_relations = []  # (normalized subject, relation, normalized object)
 
     def keep(entity, alias):
         # Raw NER is deliberately greedy; this is the step-4 precision filter.
@@ -193,6 +196,11 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         if 2 <= len(doc_keys) <= _MAX_EDGE_ENTITIES:
             for pair in itertools.combinations(sorted(doc_keys), 2):
                 edges[pair] = edges.get(pair, 0) + 1
+        # Typed relationships from cue phrases between nearby entities.
+        for subj, relation, obj in relations.extract_relations(
+            corpus.document_text(doc), doc_entities[doc["content_hash"]]
+        ):
+            raw_relations.append((normalize(subj), relation, normalize(obj)))
 
     # Step 4b: coreference — fold partial names into their fuller node, then
     # re-point that node's edges (dropping the resulting self-loops).
@@ -222,6 +230,21 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         edges = remapped
         log("coreference: merged %d partial-name nodes" % len(merge_into))
 
+    # Resolve extracted relations to node keys (after coreference merges) and
+    # tally repeated relationships into directed, weighted typed edges.
+    typed_edges = {}
+    for norm_subj, relation, norm_obj in raw_relations:
+        src = alias_index.get(norm_subj)
+        dst = alias_index.get(norm_obj)
+        if src is None or dst is None:
+            continue
+        src = merge_into.get(src, src)
+        dst = merge_into.get(dst, dst)
+        if src == dst or src not in nodes or dst not in nodes:
+            continue
+        triple = (src, relation, dst)
+        typed_edges[triple] = typed_edges.get(triple, 0) + 1
+
     kg_store.clear()
     key_to_id = {}
     for key, node in sorted(nodes.items()):
@@ -239,15 +262,25 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         kg_store.insert_edge(
             key_to_id[key_a], key_to_id[key_b], "co_occurs_with", weight
         )
+    for (src_key, relation, dst_key), weight in sorted(typed_edges.items()):
+        kg_store.insert_edge(
+            key_to_id[src_key], key_to_id[dst_key], relation, weight
+        )
     kg_store.commit()
 
     summary = {
         "documents": len(documents),
         "nodes": len(nodes),
-        "edges": len(edges),
+        "edges": len(edges) + len(typed_edges),
+        "typed_relations": len(typed_edges),
     }
     log(
-        "reconcile: %d documents -> %d nodes, %d edges"
-        % (summary["documents"], summary["nodes"], summary["edges"])
+        "reconcile: %d documents -> %d nodes, %d edges (%d typed relations)"
+        % (
+            summary["documents"],
+            summary["nodes"],
+            summary["edges"],
+            summary["typed_relations"],
+        )
     )
     return summary

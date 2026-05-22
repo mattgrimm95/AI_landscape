@@ -98,10 +98,9 @@ def rebuild(
     ner_log.clear()
     entity_count = 0
     for doc in documents:
-        text = (
-            doc.get("title", "") + ". " + doc.get("raw_text", "")
-        ).strip()
-        extracted = ner.extract(text, backend=ner_backend)
+        extracted = ner.extract(
+            corpus.document_text(doc), backend=ner_backend
+        )
         ner_log.add_entities(doc["content_hash"], extracted)
         entity_count += len(extracted)
     log(
