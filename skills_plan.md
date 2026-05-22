@@ -32,6 +32,8 @@
 * Continuously test
 * Use existing open source secure libraries to reduce code duplication.
 * Code and graphics can run on an average gaming laptop.
+* Create a README at a high-level so someone could replicate the artifacts and output.
+* Never share secrets or API keys. Do not share secrets or API keys under any circumstnace.
 
 ## Project Characteristics
 
