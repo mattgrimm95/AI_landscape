@@ -28,6 +28,8 @@
 - Low computational complexity
 - Fast feedback loop
 - Get to MVP fast
+- Create high-level decision and change log
+- Continuously test
 
 ## Project Characteristics
 
