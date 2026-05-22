@@ -1,6 +1,12 @@
+import importlib.util
 import unittest
 
 from ailandscape import ner
+
+_HAS_SPACY = (
+    importlib.util.find_spec("spacy") is not None
+    and importlib.util.find_spec("en_core_web_sm") is not None
+)
 
 
 def texts(entities):
@@ -55,7 +61,21 @@ class NerTest(unittest.TestCase):
         self.assertEqual(ner.extract("", backend="rule"), [])
 
     def test_default_backend_is_known(self):
-        self.assertIn(ner.default_backend(), {"rule", "spacy"})
+        self.assertIn(ner.default_backend(), {"rule", "spacy", "hybrid"})
+
+    @unittest.skipUnless(_HAS_SPACY, "spaCy / en_core_web_sm not installed")
+    def test_hybrid_backend_combines_gazetteer_and_spacy(self):
+        found = texts(
+            ner.extract(
+                "The Pentagon briefed Jensen Huang on the F-35 program.",
+                backend="hybrid",
+            )
+        )
+        # Gazetteer entities (precise, canonical).
+        self.assertIn("Pentagon", found)
+        self.assertIn("F-35", found)
+        # spaCy contributes entities the gazetteer does not cover.
+        self.assertTrue(any(t not in {"Pentagon", "F-35"} for t in found))
 
 
 if __name__ == "__main__":

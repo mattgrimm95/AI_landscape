@@ -177,17 +177,21 @@ def build_parser():
     run_p = sub.add_parser(
         "run", help="scrape new documents into the corpus, then rebuild"
     )
-    run_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
+    run_p.add_argument("--ner", choices=["rule", "spacy", "hybrid"], default=None)
     run_p.set_defaults(func=cmd_run)
 
     rebuild_p = sub.add_parser(
         "rebuild", help="rebuild the NER log and graph from the corpus"
     )
-    rebuild_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
+    rebuild_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None
+    )
     rebuild_p.set_defaults(func=cmd_rebuild)
 
     demo_p = sub.add_parser("demo", help="run the flow on the bundled sample feed")
-    demo_p.add_argument("--ner", choices=["rule", "spacy"], default=None)
+    demo_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None
+    )
     demo_p.set_defaults(func=cmd_demo)
 
     sub.add_parser("stats", help="show corpus and database statistics").set_defaults(

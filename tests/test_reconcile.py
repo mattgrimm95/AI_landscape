@@ -40,9 +40,14 @@ class ReconcileTest(unittest.TestCase):
             ],
         )
 
-    def test_normalize(self):
-        self.assertEqual(reconcile.normalize("  The Pentagon!  "), "pentagon")
-        self.assertEqual(reconcile.normalize("U.S. Navy"), "u s navy")
+    def test_normalize_collapses_wording_variants(self):
+        n = reconcile.normalize
+        self.assertEqual(n("  The Pentagon!  "), "pentagon")
+        self.assertEqual(n("Pentagon's"), n("Pentagon"))   # possessive
+        self.assertEqual(n("U.S."), n("US"))               # acronym dots
+        self.assertEqual(n("U.S. Navy"), "us navy")
+        self.assertEqual(n("drone swarms"), n("drone swarm"))  # plural
+        self.assertEqual(n("F-35s"), n("F-35"))
 
     def test_dedup_and_edges(self):
         self._seed()
@@ -90,6 +95,31 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(node["canonical_name"], "Lockheed Martin")
         # Both surface forms collapse onto a single node.
         self.assertEqual(self.kg.count_nodes(), 1)
+
+    def test_wording_variants_merge_node_and_edge(self):
+        # Same entities, slightly different wording across two documents.
+        self._add_doc(
+            "h1",
+            [
+                {"text": "Drone Swarms", "label": "concept"},
+                {"text": "Pentagon", "label": "organization"},
+            ],
+        )
+        self._add_doc(
+            "h2",
+            [
+                {"text": "Drone Swarm", "label": "concept"},
+                {"text": "Pentagon's", "label": "organization"},
+            ],
+        )
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # "Drone Swarms"/"Drone Swarm" and "Pentagon"/"Pentagon's" each
+        # collapse to a single node...
+        self.assertEqual(summary["nodes"], 2)
+        # ...and the relationship between them is one edge of weight 2,
+        # not two separate edges.
+        self.assertEqual(summary["edges"], 1)
+        self.assertEqual(self.kg.edges()[0]["weight"], 2)
 
 
 if __name__ == "__main__":

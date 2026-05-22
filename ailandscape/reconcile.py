@@ -28,14 +28,34 @@ _MAX_EDGE_ENTITIES = 60
 _MIN_SINGLE_MISC_DF = 2
 
 
+def _singularize(token):
+    """Drop a simple trailing plural 's' from a single word."""
+    if len(token) >= 5 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
 def normalize(text):
-    """Normalize an entity surface form into a dedup/alias key."""
-    s = (text or "").lower().strip()
-    s = re.sub(r"[^\w\s&-]", " ", s)
+    """Normalize an entity surface form into a dedup/alias key.
+
+    Collapses common wording differences so slight variants resolve to the
+    same node (and their relationship edges merge): case, curly vs straight
+    apostrophes, possessive "'s", acronym dots ("U.S." == "US"), a leading
+    "the", and a trailing plural on the final word ("drone swarms" ==
+    "drone swarm").
+    """
+    s = (text or "").lower().strip().replace("’", "'")
+    s = re.sub(r"'s\b", "", s)        # drop possessive 's
+    s = s.replace(".", "")            # drop acronym dots: "u.s." -> "us"
+    s = re.sub(r"[^\w\s&-]", " ", s)  # other punctuation -> space
     s = re.sub(r"\s+", " ", s).strip()
     if s.startswith("the "):
         s = s[4:]
-    return s
+    if not s:
+        return s
+    head, _, last = s.rpartition(" ")
+    last = _singularize(last)
+    return (head + " " + last) if head else last
 
 
 def _is_noise(alias):
@@ -65,7 +85,8 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
     """
     log = log or (lambda *_a: None)
     merge, ignore = corrections if corrections else ({}, set())
-    ignore = set(ignore) | _DEFAULT_IGNORE
+    # Normalize the default ignore terms so they match normalized aliases.
+    ignore = set(ignore) | {normalize(x) for x in _DEFAULT_IGNORE}
 
     # Pass 1: cache each document's entities and count document frequency —
     # how many distinct documents mention each normalized alias.

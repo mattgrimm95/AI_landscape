@@ -1,10 +1,12 @@
 """Step 2 of the flow: named entity recognition.
 
-Two backends, selected explicitly via config.DEFAULT_NER_BACKEND or the
+Three backends, selected explicitly via config.DEFAULT_NER_BACKEND or the
 `--ner` CLI flag:
+- "hybrid": gazetteer (precise, canonical) + spaCy (typed long tail).
 - "rule": deterministic gazetteer + proper-noun extractor (no dependencies).
-- "spacy": statistical model (requires spaCy + en_core_web_sm installed).
+- "spacy": statistical model only (requires spaCy + en_core_web_sm).
 
+"hybrid" and "spacy" fall back to "rule" if spaCy is not installed.
 Each extracted entity is a dict: {text, label, start, end}.
 `label` is one of the normalized entity types below.
 """
@@ -184,14 +186,43 @@ def _extract_spacy(text):
     return out
 
 
+def _extract_hybrid(text):
+    """Gazetteer entities plus spaCy entities for the rest of the text.
+
+    The gazetteer runs first — it is precise and yields canonical names — and
+    spaCy supplies typed entities for everything the gazetteer does not
+    already cover. Where a spaCy span overlaps a gazetteer span the gazetteer
+    wins, so curated defense entities keep their canonical form and type.
+    """
+    gaz = _extract_gazetteer(text)
+    gaz_spans = [(e["start"], e["end"]) for e in gaz]
+    extra = [
+        e
+        for e in _extract_spacy(text)
+        if not _overlaps(e["start"], e["end"], gaz_spans)
+    ]
+    merged = gaz + extra
+    merged.sort(key=lambda e: e["start"])
+    return merged
+
+
 def extract(text, backend=None):
-    """Extract entities from `text`. Returns a list of entity dicts."""
+    """Extract entities from `text`. Returns a list of entity dicts.
+
+    The "hybrid" and "spacy" backends fall back to the rule backend if spaCy
+    is unavailable, so the pipeline always runs.
+    """
     if not text:
         return []
     backend = backend or default_backend()
+    if backend == "hybrid":
+        try:
+            return _extract_hybrid(text)
+        except Exception:
+            return _extract_rule(text)
     if backend == "spacy":
         try:
             return _extract_spacy(text)
         except Exception:
-            pass  # fall back to the rule backend if spaCy fails at runtime
+            return _extract_rule(text)
     return _extract_rule(text)

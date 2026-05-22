@@ -226,3 +226,25 @@ A high-level record of steps taken and decisions made while implementing the
   explicit setting (`config.DEFAULT_NER_BACKEND`) rather than being inferred
   from whichever package is installed — installing spaCy must not silently
   change pipeline behaviour. spaCy is available on demand via `--ner spacy`.
+
+## 2026-05-22 — Hybrid NER backend and stronger de-duplication
+
+### Hybrid NER (new default)
+- Added a "hybrid" NER backend: the gazetteer runs first (precise, canonical
+  names for curated defense entities), and spaCy supplies typed entities for
+  the rest of the text; where a spaCy span overlaps a gazetteer span the
+  gazetteer wins. It degrades to the rule backend if spaCy is absent.
+- Made "hybrid" the default. Rebuild: 6,000 nodes (rule 5,628 /
+  pure-spaCy 6,601). Every node is typed — there is no "misc" bucket. The
+  gazetteer's canonicalization fixes pure-spaCy's fragmentation: "United
+  States" is now a single node (1,048 mentions) rather than separate
+  "U.S." and "The United States" nodes.
+
+### Stronger de-duplication
+- `reconcile.normalize` now collapses more wording variants onto the same
+  node key, so the variants merge and their relationship edges merge with
+  them: possessive "'s", acronym dots ("U.S." == "US"), and a trailing
+  plural on the final word ("drone swarms" == "drone swarm", "F-35s" ==
+  "F-35").
+- Default ignore terms are normalized before matching so they keep working
+  under the new normalization.

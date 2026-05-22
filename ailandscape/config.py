@@ -20,12 +20,13 @@ HTTP_USER_AGENT = (
 )
 HTTP_TIMEOUT = 20
 
-# Default NER backend: "rule" (gazetteer + proper-noun extractor — fast, no
-# heavy dependencies, canonicalizes known defense entities) or "spacy"
-# (statistical model — types every entity, higher recall, but slower and
-# without gazetteer canonicalization). An explicit choice, not inferred from
-# whichever package happens to be installed.
-DEFAULT_NER_BACKEND = "rule"
+# Default NER backend. An explicit choice, not inferred from whichever
+# package happens to be installed:
+#   "hybrid" - gazetteer (precise, canonical) + spaCy (typed long tail)
+#   "rule"   - gazetteer + proper-noun extractor (fast, no heavy deps)
+#   "spacy"  - spaCy statistical model only
+# "hybrid" degrades to "rule" automatically if spaCy is not installed.
+DEFAULT_NER_BACKEND = "hybrid"
 
 
 def ensure_dirs():
