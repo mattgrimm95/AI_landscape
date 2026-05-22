@@ -30,6 +30,11 @@ _MAX_EDGE_ENTITIES = 60
 # are sentence-initial noise rather than real named entities.
 _MIN_SINGLE_MISC_DF = 2
 
+# A leading article ("the"/"a"/"an") on an entity surface form is almost
+# always an NER span artifact ("the Naval Surface Warfare Center"); it is
+# stripped from both the dedup key and the display name.
+_LEADING_ARTICLE = re.compile(r"^(?:the|an|a)\s+", re.IGNORECASE)
+
 
 def _singularize(token):
     """Drop a simple trailing plural 's' from a single word."""
@@ -38,22 +43,26 @@ def _singularize(token):
     return token
 
 
+def _strip_article(name):
+    """Drop a leading article from an entity's display name."""
+    return _LEADING_ARTICLE.sub("", name)
+
+
 def normalize(text):
     """Normalize an entity surface form into a dedup/alias key.
 
     Collapses common wording differences so slight variants resolve to the
     same node (and their relationship edges merge): case, curly vs straight
     apostrophes, possessive "'s", acronym dots ("U.S." == "US"), a leading
-    "the", and a trailing plural on the final word ("drone swarms" ==
-    "drone swarm").
+    article ("the"/"a"/"an"), and a trailing plural on the final word
+    ("drone swarms" == "drone swarm").
     """
     s = (text or "").lower().strip().replace("’", "'")
     s = re.sub(r"'s\b", "", s)        # drop possessive 's
     s = s.replace(".", "")            # drop acronym dots: "u.s." -> "us"
     s = re.sub(r"[^\w\s&-]", " ", s)  # other punctuation -> space
     s = re.sub(r"\s+", " ", s).strip()
-    if s.startswith("the "):
-        s = s[4:]
+    s = _LEADING_ARTICLE.sub("", s)   # drop a leading article
     if not s:
         return s
     head, _, last = s.rpartition(" ")
@@ -155,7 +164,12 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             return None
         if alias in alias_index:
             return alias_index[alias], None, entity["label"], alias
-        canonical = merge.get(alias, entity["text"].strip())
+        # A human-curated merge value is the display name verbatim; a raw
+        # surface form has its leading-article NER artifact stripped.
+        if alias in merge:
+            canonical = merge[alias]
+        else:
+            canonical = _strip_article(entity["text"].strip())
         key = normalize(canonical)
         if not key:
             return None
