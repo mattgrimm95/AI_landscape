@@ -285,3 +285,26 @@ A high-level record of steps taken and decisions made while implementing the
 - The pyvis HTML is static, so corrections are made via the CLI rather than
   in-browser. An in-GUI correction editor would need a server-backed app
   (e.g. Streamlit) — noted as a possible future enhancement.
+
+## 2026-05-22 — Front-end / back-end web app
+
+- Upgraded the visualization to a real client/server web app: a **FastAPI
+  backend** (`server.py`) plus a **vanilla-JS + Cytoscape.js frontend**
+  (`ailandscape/web/`). New `serve` CLI command runs it via uvicorn,
+  bound to 127.0.0.1.
+- Scale is handled by the *backend*: the full graph (6,000 nodes / 95k
+  edges) never reaches the browser. The API serves focused subgraphs
+  (`/api/graph`), search (`/api/search`), node neighborhoods
+  (`/api/node/{id}`), type counts, and the overview. The frontend renders
+  only what it receives — a few hundred nodes — so it stays smooth on a
+  single laptop. No JS build toolchain (Cytoscape.js via CDN).
+- In-browser features: search, type / mention / edge-weight filters,
+  click-a-node detail panel with neighbors, and **in-GUI corrections** —
+  "ignore" / "merge into" POST to `/api/correct`, which writes
+  `corrections.json` and re-runs *reconcile only* (no NER), so the corrected
+  graph is ready in seconds and reconstruction stays deterministic.
+- Chose a vanilla-JS frontend over a React/SPA build for MVP speed, zero
+  build step, and reproducibility. The static `visualize` command is kept
+  as a shareable-snapshot export.
+- Tests cover the API with FastAPI's TestClient (config paths monkeypatched
+  to a temp graph). 55 tests pass.

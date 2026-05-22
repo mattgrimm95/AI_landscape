@@ -80,7 +80,8 @@ class SelectSubgraphTest(unittest.TestCase):
         )
         visualize.render(nodes, edges, out)
         self.assertTrue(os.path.exists(out))
-        self.assertIn("Pentagon", open(out, encoding="utf-8").read())
+        with open(out, encoding="utf-8") as handle:
+            self.assertIn("Pentagon", handle.read())
 
 
 if __name__ == "__main__":

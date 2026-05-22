@@ -6,7 +6,8 @@ Usage:
     python -m ailandscape.cli demo       run the flow on the bundled sample feed
     python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli overview   print a statistical overview of the data
-    python -m ailandscape.cli visualize  render an interactive HTML graph
+    python -m ailandscape.cli visualize  render a static interactive HTML graph
+    python -m ailandscape.cli serve       run the interactive web app (browser)
     python -m ailandscape.cli correct merge "DoD" "Department of Defense"
     python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
@@ -28,7 +29,7 @@ from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
 
 SAMPLE_FEED = config.ROOT / "samples" / "sample_feed.xml"
-CORRECTIONS_FILE = config.ROOT / "corrections.json"
+CORRECTIONS_FILE = config.CORRECTIONS_FILE
 
 
 def _log(msg):
@@ -219,6 +220,23 @@ def cmd_correct(args):
     return 0
 
 
+def cmd_serve(args):
+    import uvicorn
+
+    config.ensure_dirs()
+    print(
+        "AI Landscape web app running at http://127.0.0.1:%d  (Ctrl+C to stop)"
+        % args.port
+    )
+    uvicorn.run(
+        "ailandscape.server:app",
+        host="127.0.0.1",
+        port=args.port,
+        log_level="warning",
+    )
+    return 0
+
+
 def cmd_snapshot(_args):
     ner_log, kg = _open_stores()
     try:
@@ -322,6 +340,10 @@ def build_parser():
         help="merge: <surface form> <canonical name>;  ignore: <surface form>",
     )
     correct_p.set_defaults(func=cmd_correct)
+
+    serve_p = sub.add_parser("serve", help="run the interactive web app")
+    serve_p.add_argument("--port", type=int, default=8000)
+    serve_p.set_defaults(func=cmd_serve)
     sub.add_parser(
         "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)

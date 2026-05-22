@@ -3,7 +3,10 @@ beautifulsoup4>=4.9
 feedparser>=6.0
 trafilatura>=2.0
 lxml_html_clean>=0.1  # needed by trafilatura's justext dep on lxml >= 5.2
-pyvis>=0.3            # interactive HTML graph visualization
+pyvis>=0.3            # static interactive HTML graph export
+fastapi>=0.110        # web app backend
+uvicorn>=0.27         # ASGI server for the web app
+httpx>=0.27           # used by the API test client
 
 # Optional: the spaCy NER backend (select via --ner spacy or
 # config.DEFAULT_NER_BACKEND). The pipeline runs fully without it; the

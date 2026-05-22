@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Landscape — Knowledge Graph</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
+</head>
+<body>
+  <header id="topbar">
+    <h1>AI Landscape <span>National-Security Knowledge Graph</span></h1>
+    <div id="stats">loading…</div>
+  </header>
+
+  <div id="layout">
+    <aside id="sidebar">
+      <section class="panel">
+        <h2>Search</h2>
+        <input id="search" type="search" placeholder="Find an entity…"
+               autocomplete="off" />
+        <ul id="search-results"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>View</h2>
+        <label>Entity type
+          <select id="f-type"><option value="">all types</option></select>
+        </label>
+        <label>Min mentions
+          <input id="f-min-mentions" type="number" value="0" min="0" />
+        </label>
+        <label>Min edge weight
+          <input id="f-min-weight" type="number" value="5" min="1" />
+        </label>
+        <label>Max nodes
+          <input id="f-max-nodes" type="number" value="70" min="5" max="400" />
+        </label>
+        <div class="row">
+          <button id="apply">Apply</button>
+          <button id="reset" class="ghost">Reset</button>
+        </div>
+      </section>
+
+      <section class="panel" id="detail-panel" hidden>
+        <h2>Selected entity</h2>
+        <div id="detail"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Legend</h2>
+        <ul id="legend"></ul>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="cy"></div>
+      <div id="hint">drag to pan · scroll to zoom · click a node for detail</div>
+      <div id="message"></div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

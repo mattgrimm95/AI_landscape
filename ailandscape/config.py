@@ -14,6 +14,10 @@ CORPUS_FILE = CORPUS_DIR / "documents.jsonl"
 NER_OUTPUT_DB = DATA_DIR / "ner_output_log.db"
 KG_DB = DATA_DIR / "knowledge_graph.db"
 
+# Manual corrections (merge/ignore). Version-controlled and consumed by
+# reconcile, so corrections survive and reconstruction stays deterministic.
+CORRECTIONS_FILE = ROOT / "corrections.json"
+
 # Append-only log of pipeline runs (timing + counts), used by the overview
 # report. Derived data — lives under the gitignored data/ directory.
 RUN_HISTORY_FILE = DATA_DIR / "run_history.jsonl"
