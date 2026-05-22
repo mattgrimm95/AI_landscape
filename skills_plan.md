@@ -11,7 +11,7 @@
 * DevOps / CI/CD
 * UI
 * Workflow / logic
-* Dependency manager
+* Dependency manager -- when conflicted, prioritize updating essential libraries to the app like Python and the NER library for a knowledge graph application.
 * Strategic app recommendations
 * Marketing
 * Brainstorm helper
@@ -27,7 +27,7 @@
 * Clear, human-readable code
 * Low computational complexity (specifically Big O notation)
 * Fast feedback loop
-* Get to MVP fast
+* Get to MVP fast. Try to one-shot the entire application. Add recommended features that could be worked on later to the TODO list.
 * Create high-level decision and change log
 * Continuously test
 * Use existing open source secure libraries to reduce code duplication.
@@ -37,7 +37,9 @@
 * Don't ever push .pem files to an online code base.
 * Add test that checks to make sure no secrets or API keys are exposed in code or committed for pushing.
 * Run tests often.
-* Create a TODO file to easily draft new commands while other commands are running. Add most recent to top. Mark done items with [done].
+* Create a TODO file to easily draft new commands while other commands are running. Add most recent to top. Mark done items with "[done]".
+* Bias libraries to most recent versions.
+* Natural Law coding: always keep in mind the ultimate goals and essential features of applications. Orient toward the goals and prioritize what is essential. Ask if uncertain about the ultimate goals, but make sure to immediately ask if needed.
 
 ## Project Characteristics
 
