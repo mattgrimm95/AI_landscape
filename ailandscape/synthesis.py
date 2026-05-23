@@ -1,12 +1,21 @@
 """Optional LLM narrative synthesis.
 
-Turns a generated briefing into a short analyst-style narrative by calling
-the Anthropic Messages API. Strictly opt-in: it does nothing unless an
-ANTHROPIC_API_KEY is present in the environment, so the deterministic core
-of the pipeline never depends on it and the project runs fully without it.
+Turns a generated briefing into a short analyst-style narrative. Two
+transports are supported, picked automatically in this order:
 
-The API key is read from the environment only — it is never stored, logged,
-written to disk, or returned to a caller.
+  1. **Claude Code CLI** (preferred when available) — shells out to the
+     `claude` binary, billed to the user's Claude Code subscription. No
+     API key needed; this is the right path for a Claude Code Max user.
+  2. **Anthropic Messages API** — direct HTTP call using ANTHROPIC_API_KEY
+     from the environment. The legacy path; kept so users without Claude
+     Code installed can still opt in by setting a standalone API key.
+
+Strictly opt-in: it does nothing unless one of the two transports is
+available, so the deterministic core of the pipeline never depends on it
+and the project runs fully without either.
+
+The API key is read from the environment only — it is never stored,
+logged, written to disk, or returned to a caller.
 """
 
 import json
@@ -14,19 +23,64 @@ import os
 import urllib.error
 import urllib.request
 
+from . import claude_cli
+
 API_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_VERSION = "2023-06-01"
 # Overridable via the ANTHROPIC_MODEL environment variable.
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
+TRANSPORT_CLI = "claude-code-cli"
+TRANSPORT_API = "anthropic-api"
+
 
 class SynthesisError(Exception):
-    """Raised when narrative synthesis is unavailable or the API call fails."""
+    """Raised when narrative synthesis is unavailable or the call fails."""
+
+
+def transport():
+    """Return the name of the preferred synthesis transport, or None.
+
+    Picks the Claude Code CLI first (subscription-billed, no key needed),
+    falls back to the Anthropic API only when the CLI is unavailable.
+    Returns one of ``TRANSPORT_CLI``, ``TRANSPORT_API``, or ``None``.
+    """
+    if claude_cli.is_available():
+        return TRANSPORT_CLI
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return TRANSPORT_API
+    return None
 
 
 def is_configured():
-    """True if an Anthropic API key is present in the environment."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    """True if some synthesis transport is available on this machine."""
+    return transport() is not None
+
+
+def _call(prompt, max_tokens=700, timeout=60):
+    """Route `prompt` through whichever synthesis transport is available.
+
+    Tries the Claude Code CLI first (uses the operator's subscription, no
+    billing on a separate API key), then the Anthropic API. Raises
+    SynthesisError if neither transport is configured, or if the chosen
+    transport errors out.
+
+    `max_tokens` is honored by the API path; the CLI path doesn't take
+    one (Claude Code controls response length itself), but the argument
+    is accepted for signature compatibility.
+    """
+    t = transport()
+    if t == TRANSPORT_CLI:
+        try:
+            return claude_cli.summarize(prompt, timeout=max(timeout, 180))
+        except claude_cli.ClaudeCliError as exc:
+            raise SynthesisError(str(exc)) from exc
+    if t == TRANSPORT_API:
+        return _call_anthropic(prompt, max_tokens=max_tokens, timeout=timeout)
+    raise SynthesisError(
+        "no synthesis transport available: install Claude Code (preferred) "
+        "or set ANTHROPIC_API_KEY"
+    )
 
 
 def _call_anthropic(prompt, max_tokens=700, timeout=60):
@@ -113,9 +167,11 @@ def _briefing_prompt(briefing_data):
 def summarize_briefing(briefing_data, max_tokens=700):
     """Return an LLM-written narrative summary of a briefing dict.
 
-    Raises SynthesisError if no API key is configured or the call fails.
+    Routes through the preferred transport (Claude Code CLI when
+    available, Anthropic API otherwise). Raises SynthesisError if no
+    transport is configured or the call fails.
     """
-    return _call_anthropic(
+    return _call(
         _briefing_prompt(briefing_data), max_tokens=max_tokens
     )
 
@@ -169,12 +225,13 @@ def summarize_hype(documents, sbir_funding=None, max_tokens=400):
     """Return an exciting, 30-second-read hype summary of recent AI news.
 
     `documents` should be the most recent day's (or few days') docs from
-    the corpus — caller-selected so this stays single-purpose. Raises
-    SynthesisError if no key is configured or the call fails. The shape
-    matches `summarize_briefing` for symmetry; callers handle the
-    graceful no-op via `is_configured()`.
+    the corpus — caller-selected so this stays single-purpose. Routes
+    through the preferred transport (Claude Code CLI when available,
+    Anthropic API otherwise). Raises SynthesisError if no transport is
+    configured or the call fails. Callers handle the graceful no-op via
+    `is_configured()`.
     """
-    return _call_anthropic(
+    return _call(
         _hype_prompt(documents, sbir_funding or {}),
         max_tokens=max_tokens,
     )

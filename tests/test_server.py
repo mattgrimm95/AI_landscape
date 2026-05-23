@@ -5,7 +5,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from ailandscape import config, server, synthesis_cache
+from ailandscape import claude_cli, config, server, synthesis_cache
 from ailandscape.storage_kg import KnowledgeGraphStore
 from ailandscape.storage_ner import NEROutputLog
 
@@ -21,6 +21,7 @@ class ServerApiTest(unittest.TestCase):
             config.RUN_HISTORY_FILE,
         )
         self._orig_snapshot_dir = synthesis_cache.SNAPSHOT_SUBDIR
+        self._orig_cli_available = claude_cli.is_available
         config.KG_DB = pathlib.Path(self.tmp) / "kg.db"
         config.NER_OUTPUT_DB = pathlib.Path(self.tmp) / "ner.db"
         config.CORPUS_FILE = pathlib.Path(self.tmp) / "documents.jsonl"
@@ -29,6 +30,10 @@ class ServerApiTest(unittest.TestCase):
         # Each test gets its own snapshot dir so the synthesis cache
         # doesn't bleed across tests (or read the repo's real snapshots).
         synthesis_cache.SNAPSHOT_SUBDIR = pathlib.Path(self.tmp) / "syntheses"
+        # Server tests assume no synthesis transport is installed unless
+        # explicitly enabled per-test (so can_refresh is deterministic
+        # regardless of whether the developer has Claude Code installed).
+        claude_cli.is_available = lambda: False
 
         kg = KnowledgeGraphStore(config.KG_DB)
         china = kg.insert_node("China", "place", mention_count=5, document_count=3)
@@ -85,6 +90,7 @@ class ServerApiTest(unittest.TestCase):
             config.RUN_HISTORY_FILE,
         ) = self._orig
         synthesis_cache.SNAPSHOT_SUBDIR = self._orig_snapshot_dir
+        claude_cli.is_available = self._orig_cli_available
 
     def test_graph_endpoint(self):
         resp = self.client.get("/api/graph?min_weight=1")

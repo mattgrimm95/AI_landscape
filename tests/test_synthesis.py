@@ -4,13 +4,18 @@ import unittest
 import urllib.error
 import urllib.request
 
-from ailandscape import synthesis
+from ailandscape import claude_cli, synthesis
 
 
 class SynthesisTest(unittest.TestCase):
     def setUp(self):
         self._orig_key = os.environ.get("ANTHROPIC_API_KEY")
         self._orig_urlopen = urllib.request.urlopen
+        # These tests exercise the Anthropic-API transport. Disable the
+        # Claude Code CLI path so the transport router doesn't pick it
+        # up on a developer machine that has the CLI installed.
+        self._orig_cli_available = claude_cli.is_available
+        claude_cli.is_available = lambda: False
 
     def tearDown(self):
         if self._orig_key is None:
@@ -18,6 +23,7 @@ class SynthesisTest(unittest.TestCase):
         else:
             os.environ["ANTHROPIC_API_KEY"] = self._orig_key
         urllib.request.urlopen = self._orig_urlopen
+        claude_cli.is_available = self._orig_cli_available
 
     def _briefing(self):
         return {
@@ -88,6 +94,10 @@ class HypeSynthesisTest(unittest.TestCase):
     def setUp(self):
         self._orig_key = os.environ.get("ANTHROPIC_API_KEY")
         self._orig_urlopen = urllib.request.urlopen
+        # Exercise the API path; disable the CLI transport on machines
+        # where it happens to be installed.
+        self._orig_cli_available = claude_cli.is_available
+        claude_cli.is_available = lambda: False
 
     def tearDown(self):
         if self._orig_key is None:
@@ -95,6 +105,7 @@ class HypeSynthesisTest(unittest.TestCase):
         else:
             os.environ["ANTHROPIC_API_KEY"] = self._orig_key
         urllib.request.urlopen = self._orig_urlopen
+        claude_cli.is_available = self._orig_cli_available
 
     def _docs(self):
         return [
@@ -168,6 +179,97 @@ class HypeSynthesisTest(unittest.TestCase):
         self.assertEqual(result, "Quiet day.")
         prompt = captured["body"]["messages"][0]["content"]
         self.assertIn("no documents", prompt)
+
+
+class CliTransportTest(unittest.TestCase):
+    """The CLI-first router: when claude_cli is available, prefer it."""
+
+    def setUp(self):
+        # Force the CLI to be "available" regardless of host.
+        self._orig_available = claude_cli.is_available
+        self._orig_summarize = claude_cli.summarize
+        claude_cli.is_available = lambda: True
+
+    def tearDown(self):
+        claude_cli.is_available = self._orig_available
+        claude_cli.summarize = self._orig_summarize
+
+    def test_transport_picks_cli_when_available(self):
+        self.assertEqual(synthesis.transport(), synthesis.TRANSPORT_CLI)
+
+    def test_summarize_briefing_routes_through_cli(self):
+        captured = {}
+
+        def fake_summarize(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "Cli-written narrative."
+
+        claude_cli.summarize = fake_summarize
+        result = synthesis.summarize_briefing({
+            "totals": {"documents": 5, "entities": 10, "typed_relations": 3},
+            "trending_topics": [{"name": "Computer Vision"}],
+            "top_entities": [{"name": "Pentagon"}],
+            "contract_awards": [],
+            "key_relationships": [],
+        })
+        self.assertEqual(result, "Cli-written narrative.")
+        self.assertIn("Computer Vision", captured["prompt"])
+
+    def test_summarize_hype_routes_through_cli(self):
+        captured = {}
+
+        def fake_summarize(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "Cli-written hype!"
+
+        claude_cli.summarize = fake_summarize
+        docs = [
+            {"title": "Big day", "source": "X",
+             "raw_text": "Pentagon awarded Lockheed a contract."},
+        ]
+        result = synthesis.summarize_hype(docs)
+        self.assertEqual(result, "Cli-written hype!")
+        self.assertIn("Big day", captured["prompt"])
+
+    def test_cli_error_becomes_synthesis_error(self):
+        def boom(*a, **kw):
+            raise claude_cli.ClaudeCliError("CLI not logged in")
+
+        claude_cli.summarize = boom
+        with self.assertRaises(synthesis.SynthesisError) as ctx:
+            synthesis.summarize_hype([])
+        self.assertIn("logged in", str(ctx.exception))
+
+
+class TransportPriorityTest(unittest.TestCase):
+    """The router prefers CLI > API > None and reports the chosen one."""
+
+    def setUp(self):
+        self._orig_key = os.environ.get("ANTHROPIC_API_KEY")
+        self._orig_available = claude_cli.is_available
+
+    def tearDown(self):
+        if self._orig_key is None:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+        else:
+            os.environ["ANTHROPIC_API_KEY"] = self._orig_key
+        claude_cli.is_available = self._orig_available
+
+    def test_none_when_neither_transport_present(self):
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        claude_cli.is_available = lambda: False
+        self.assertIsNone(synthesis.transport())
+        self.assertFalse(synthesis.is_configured())
+
+    def test_api_when_only_key_present(self):
+        os.environ["ANTHROPIC_API_KEY"] = "fake"
+        claude_cli.is_available = lambda: False
+        self.assertEqual(synthesis.transport(), synthesis.TRANSPORT_API)
+
+    def test_cli_preferred_even_when_key_also_present(self):
+        os.environ["ANTHROPIC_API_KEY"] = "fake"
+        claude_cli.is_available = lambda: True
+        self.assertEqual(synthesis.transport(), synthesis.TRANSPORT_CLI)
 
 
 if __name__ == "__main__":
