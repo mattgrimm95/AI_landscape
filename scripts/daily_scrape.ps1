@@ -28,11 +28,37 @@ if (-not $python -or -not $git) {
     exit 1
 }
 
+# Pre-flight: capture whether ANTHROPIC_API_KEY is reaching this process.
+# Logged before the run so a missing-key day can be diagnosed by grep
+# instead of squinting at the python output for the "skipping" line.
+if ($env:ANTHROPIC_API_KEY) {
+    Write-Log "PREFLIGHT: ANTHROPIC_API_KEY present (length=$($env:ANTHROPIC_API_KEY.Length)); synthesis will be attempted."
+} else {
+    Write-Log 'PREFLIGHT: ANTHROPIC_API_KEY is NOT set in this process env; synthesis will be skipped.'
+}
+
 # 1. Scrape feeds into the corpus and rebuild the derived databases. The
 #    rebuild step also writes today's synthesis sidecar (hype + briefing
 #    narrative) to snapshots/syntheses/ if ANTHROPIC_API_KEY is set on
 #    this machine — a silent no-op otherwise.
 Write-Log ((& $python -m ailandscape.cli run 2>&1 | Out-String).TrimEnd())
+
+# Post-run synthesis verification: did today's snapshot land?
+# This is the unambiguous signal — a single grep target — so a future
+# "I set the key but no snapshot appeared" can be diagnosed without
+# parsing the python JSON output. The snapshot filename is the UTC date
+# (matching ailandscape.synthesis_cache.snapshot_path).
+$snapshotPath = Join-Path $repo ("snapshots\syntheses\" + ([DateTime]::UtcNow.ToString('yyyy-MM-dd')) + '.json')
+if (Test-Path $snapshotPath) {
+    $info = Get-Item $snapshotPath
+    Write-Log "SYNTHESIS: snapshot present at $snapshotPath (size=$($info.Length)B, mtime=$($info.LastWriteTime.ToString('HH:mm:ss')))"
+} else {
+    if ($env:ANTHROPIC_API_KEY) {
+        Write-Log "SYNTHESIS: WARN — key was set but no snapshot was written at $snapshotPath. Check the python output above for the failure mode (rate-limit, network, etc.)."
+    } else {
+        Write-Log "SYNTHESIS: no snapshot written (expected — no key)."
+    }
+}
 
 # 2. Commit and push: the corpus AND any new synthesis snapshot.
 #    Staging snapshots/syntheses/ alongside the corpus means a daily
