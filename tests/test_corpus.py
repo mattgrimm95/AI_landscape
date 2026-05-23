@@ -155,6 +155,20 @@ class CorpusTest(unittest.TestCase):
         self.assertEqual(pd({"published": ""}), "")
         self.assertEqual(pd({}), "")
 
+    def test_published_date_status_distinguishes_missing_vs_unparseable(self):
+        # `missing` and `unparseable` produce the same empty-string date but
+        # different statuses, so the overview report can surface feeds
+        # silently shipping a date format we don't recognize.
+        s = corpus.published_date_status
+        self.assertEqual(s({"published": "2026-05-21"})[1], "parsed")
+        self.assertEqual(
+            s({"published": "Wed, 21 May 2026 16:00:12 +0000"})[1], "parsed"
+        )
+        self.assertEqual(s({})[1], "missing")
+        self.assertEqual(s({"published": ""})[1], "missing")
+        self.assertEqual(s({"published": "21 maggio 2026"})[1], "unparseable")
+        self.assertEqual(s({"published": "garbage"})[1], "unparseable")
+
 
 if __name__ == "__main__":
     unittest.main()

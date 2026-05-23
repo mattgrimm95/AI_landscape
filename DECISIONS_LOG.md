@@ -401,3 +401,78 @@ A high-level record of steps taken and decisions made while implementing the
   corpus yet; the integration degrades gracefully and will populate on the
   next `run` / `sbir` once the endpoint is reachable. Verified end-to-end
   against the fixture in the meantime.
+
+## 2026-05-23 — Data-quality pipeline improvements (10-item batch)
+
+A coordinated set of changes targeting observability, drift detection, and
+curator-loop velocity. What landed and why:
+
+### Observability
+- **Per-feed health scorecards** in `pipeline.scrape_into_corpus` (and the
+  SBIR / J-Books variants): each scrape now records `{fetched, added,
+  extracted, error}` per source name. The data lands in `run_history.jsonl`
+  on every full `run` and is consumed by `report._feed_health`, which
+  surfaces feeds that produced no new docs in 14 days and contributed no
+  adds in recent runs — "silently broken" feeds that were invisible before.
+- **Quality KPIs on each run record** (`pipeline._quality_kpis_after_rebuild`):
+  singletons, isolated nodes, partial-name duplicates, mentions-per-node,
+  typed-relation count. These ride on `run_history.jsonl` and feed a new
+  `overview --diff` view (`report.diff_runs` / `render_diff`) that shows
+  run-over-run deltas with a `**` marker on changes >= 10%.
+- **Date-parse coverage** (`corpus.published_date_status`): distinguishes
+  `missing` from `unparseable`. The overview now lists per-source rates so
+  a feed shipping a date format the pipeline can't read no longer silently
+  flattens to `fetched_at`.
+- **Extraction-signal coverage** (`report._signal_coverage`): docs whose
+  body produced zero entities, and docs with body < 300 chars, get counted
+  and surfaced — fingerprints of silent scrape failure or off-topic content.
+
+### Curator loop
+- **Gazetteer-candidate auto-surface** (`review._gazetteer_candidates`):
+  high-frequency multi-word `misc` nodes (docs >= 3, mentions >= 5) not in
+  the gazetteer land in `review.json` under `gazetteer_candidates`. Closes
+  the loop from "find a missing entity by hand" to "review the curator
+  shortlist".
+- **Bulk-apply from review.json** (`ailandscape correct-from-review`): walks
+  the accumulating store and prompts y/n for each partial-name merge,
+  structural-noise ignore, and acronym mapping, then writes a single batched
+  update to `corrections.json` and rebuilds. `--yes` skips prompts for
+  trusted bulk runs.
+- **Apposition-based acronym coreference** (`ailandscape/acronyms.py`): the
+  long-deferred TODO. Mines `<Expansion> (<ACRONYM>)` / `<ACRONYM>
+  (<Expansion>)` appositions and verifies the acronym is the initials
+  sequence of the expansion — trying every include/skip combination on
+  connector words ("of"/"the"/"and"), since "DOD" includes the connector
+  initial while "DARPA" skips it. Greedy regex captures are refined to the
+  shortest matching span. Pairs are gated by `MIN_DOC_FREQ = 2`; survivors
+  land in `review.json` for human approval — never auto-merged. First live
+  run on the corpus surfaced 32 corroborated mappings (EECS, CSAIL, CCA,
+  ISR, IRGC, UAE, NLP, LLM, AFSOC, HELIOS, ...).
+
+### Reconcile / NER hardening
+- **Email-key person merging** (`reconcile._coreference_by_email`): two
+  person nodes carrying the same `attributes.email` (extracted by
+  `_split_attributes` from academic-blog contact blocks) fold into one
+  node. Shared role inboxes (`info@`, `press@`, ...) are excluded.
+- **NER chain hygiene** (`ner.py`): the proper-noun extractor now breaks
+  the chain at a token ending in `.`/`?`/`!` (sentence terminator),
+  requires continuation tokens to be 2+ characters (rejects "for X" bridges
+  in math-heavy text), rejects multi-word ALL-CAPS phrases as headers
+  ("BREAKING NEWS"), and adds common imperative verbs ("Use", "Call",
+  "Let", ...) to `_STOPWORDS`. Reconcile also rejects entity surfaces
+  containing math/code operators (`=`, `<>`, `{}`, `[]`, `/`) before
+  `normalize()` strips them and the signal is lost.
+
+### Test rigor
+- **Golden-snapshot regression guard** (`tests/test_golden_snapshot.py`):
+  the bundled 4-article sample feed rebuilds to a fixed 17 nodes / 44 edges
+  / 37 NER entities. Any silent heuristic change that drops a real entity
+  or invents new merges trips this test.
+- **NER adversarial battery** (`tests/test_ner_adversarial.py`): code
+  blocks, URL slugs, CSS class names, math notation, emoji runs, ALL-CAPS
+  headers, mixed-language prose, URLs/emails in text, and extreme-length
+  phrases all assert "no graph node survives." These caught and drove the
+  NER hygiene fixes above.
+- 50 new tests total; 220 pass (3 skipped — spaCy-dependent), up from a
+  170-test baseline.
+

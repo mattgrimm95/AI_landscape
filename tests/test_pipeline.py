@@ -1,4 +1,6 @@
+import json
 import os
+import pathlib
 import tempfile
 import unittest
 
@@ -68,6 +70,92 @@ class PipelineTest(unittest.TestCase):
         finally:
             ner_log.close()
             kg.close()
+
+
+class FeedHealthScorecardTest(unittest.TestCase):
+    """`scrape_into_corpus` should now emit a per-feed scorecard."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.corpus_path = os.path.join(self.tmp, "documents.jsonl")
+        self._orig_fetch = scraper.fetch_feed
+        self._orig_extract = scraper.extract_article
+        self._orig_sleep = pipeline.time.sleep
+        pipeline.time.sleep = lambda _s: None
+
+    def tearDown(self):
+        scraper.fetch_feed = self._orig_fetch
+        scraper.extract_article = self._orig_extract
+        pipeline.time.sleep = self._orig_sleep
+
+    def test_per_feed_stats_track_each_source(self):
+        # Two feeds: one returns articles, one errors out. The result
+        # should carry a `feeds` dict with a row for each.
+        def fake_fetch(feed):
+            if feed["url"] == "ok":
+                return [
+                    {"url": "https://example.test/a", "title": "A",
+                     "raw_text": "body A"},
+                    {"url": "https://example.test/b", "title": "B",
+                     "raw_text": "body B"},
+                ]
+            raise scraper.FeedError("simulated outage")
+        scraper.fetch_feed = fake_fetch
+        scraper.extract_article = lambda url, fallback="": fallback
+        feeds = [
+            {"name": "Good", "url": "ok"},
+            {"name": "Broken", "url": "down"},
+        ]
+        result = pipeline.scrape_into_corpus(feeds, self.corpus_path)
+        self.assertIn("feeds", result)
+        self.assertEqual(result["feeds"]["Good"]["fetched"], 2)
+        self.assertEqual(result["feeds"]["Good"]["added"], 2)
+        self.assertEqual(result["feeds"]["Good"]["error"], "")
+        self.assertIn("simulated outage", result["feeds"]["Broken"]["error"])
+        self.assertEqual(result["feeds"]["Broken"]["added"], 0)
+        # Totals still match the legacy fields.
+        self.assertEqual(result["added"], 2)
+
+
+class QualityKpiTest(unittest.TestCase):
+    """Pipeline `run` must capture quality KPIs in the run-history record."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.corpus_path = os.path.join(self.tmp, "documents.jsonl")
+        for article in scraper.scrape_fixture(SAMPLE, "Sample Feed"):
+            corpus.append(self.corpus_path, pipeline.make_record(article))
+        self._orig_history = config.RUN_HISTORY_FILE
+        config.RUN_HISTORY_FILE = pathlib.Path(self.tmp) / "run_history.jsonl"
+        # No actual scrape, just rebuild + record.
+        self._orig_sleep = pipeline.time.sleep
+        pipeline.time.sleep = lambda _s: None
+
+    def tearDown(self):
+        config.RUN_HISTORY_FILE = self._orig_history
+        pipeline.time.sleep = self._orig_sleep
+
+    def test_run_records_quality_kpis(self):
+        ner_log = NEROutputLog(os.path.join(self.tmp, "ner.db"))
+        kg = KnowledgeGraphStore(os.path.join(self.tmp, "kg.db"))
+        try:
+            # An empty feeds list means scrape is a no-op; the rebuild
+            # path still runs and records the quality KPIs.
+            pipeline.run(
+                feeds=[], corpus_path=self.corpus_path,
+                ner_log=ner_log, kg_store=kg, ner_backend="rule",
+            )
+        finally:
+            ner_log.close()
+            kg.close()
+        lines = config.RUN_HISTORY_FILE.read_text(encoding="utf-8").splitlines()
+        record = json.loads(lines[-1])
+        # Quality KPIs land on the record.
+        for key in (
+            "singletons", "singleton_pct", "isolated", "isolated_pct",
+            "partial_name_dups", "mentions_per_node", "typed_relations",
+        ):
+            self.assertIn(key, record)
 
 
 class BackfillTest(unittest.TestCase):

@@ -19,6 +19,8 @@ Usage:
     python -m ailandscape.cli discover-feeds --health-check    audit existing feeds
     python -m ailandscape.cli enrich plan.json       fetch articles + synthesis, rebuild
     python -m ailandscape.cli correct merge "DoD" "Department of Defense"
+    python -m ailandscape.cli correct-from-review --merges --ignores --acronyms   bulk-apply review.json
+    python -m ailandscape.cli overview --diff   show KPI deltas between the last two runs
     python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
 
@@ -218,7 +220,11 @@ def cmd_stats(_args):
     return 0
 
 
-def cmd_overview(_args):
+def cmd_overview(args):
+    if getattr(args, "diff", False):
+        diff = report.diff_runs(config.RUN_HISTORY_FILE)
+        print(report.render_diff(diff))
+        return 0
     ner_log, kg = _open_stores()
     try:
         documents = corpus.load(config.CORPUS_FILE)
@@ -389,6 +395,135 @@ def cmd_correct(args):
     print("updated %s" % path)
     print("run 'rebuild' to apply the correction.")
     return 0
+
+
+def cmd_correct_from_review(args):
+    """Walk `review.json` suggestions and bulk-apply approved ones.
+
+    The accumulating `review.json` store can carry tens of partial-name
+    merge suggestions and structural-noise ignores after a single sweep.
+    Applying them via `correct merge <a> <b>` one at a time means dozens
+    of CLI invocations and a separate rebuild each. This command iterates
+    each suggestion, prompts y/n/skip, batches the approvals into
+    `corrections.json`, and (unless `--no-rebuild`) runs one rebuild at
+    the end. With `--yes`, every suggestion is auto-approved without a
+    prompt — useful when the curator has already reviewed the file.
+    """
+    review_path = config.REVIEW_FILE
+    if not review_path.exists():
+        print("no review.json found — run `review` first.", file=sys.stderr)
+        return 1
+    try:
+        review_store = json.loads(review_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print("review.json is not valid JSON; aborting.", file=sys.stderr)
+        return 1
+
+    corrections_path = CORRECTIONS_FILE
+    corrections = {"merge": {}, "ignore": []}
+    if corrections_path.exists():
+        try:
+            corrections = json.loads(corrections_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(
+                "corrections.json is not valid JSON; aborting.",
+                file=sys.stderr,
+            )
+            return 1
+    corrections.setdefault("merge", {})
+    corrections.setdefault("ignore", [])
+
+    merges = review_store.get("suggested_merges", []) if args.merges else []
+    ignores = review_store.get("suggested_ignores", []) if args.ignores else []
+    acros = (
+        review_store.get("acronym_suggestions", []) if args.acronyms else []
+    )
+    if not merges and not ignores and not acros:
+        print(
+            "nothing to apply: use --merges, --ignores, and/or --acronyms"
+            " to select."
+        )
+        return 0
+
+    applied_merges = 0
+    applied_ignores = 0
+    applied_acros = 0
+    for suggestion in merges:
+        bare = suggestion.get("from")
+        full = suggestion.get("into")
+        if not bare or not full:
+            continue
+        if bare in corrections["merge"]:
+            continue
+        if not _ask_yes(args.yes, 'merge "%s" -> "%s"?' % (bare, full)):
+            continue
+        corrections["merge"][bare] = full
+        applied_merges += 1
+
+    for suggestion in ignores:
+        name = suggestion.get("name")
+        if not name or name in corrections["ignore"]:
+            continue
+        if not _ask_yes(args.yes, 'ignore "%s"?' % name):
+            continue
+        corrections["ignore"].append(name)
+        applied_ignores += 1
+
+    for suggestion in acros:
+        acronym = suggestion.get("acronym")
+        expansion = suggestion.get("expansion")
+        if not acronym or not expansion:
+            continue
+        if acronym in corrections["merge"]:
+            continue
+        prompt = 'map acronym "%s" -> "%s" (corroborated in %d docs)?' % (
+            acronym, expansion, suggestion.get("documents", 0)
+        )
+        if not _ask_yes(args.yes, prompt):
+            continue
+        corrections["merge"][acronym] = expansion
+        applied_acros += 1
+
+    if not (applied_merges or applied_ignores or applied_acros):
+        print("no suggestions applied — corrections.json is unchanged.")
+        return 0
+
+    corrections_path.write_text(
+        json.dumps(corrections, indent=2) + "\n", encoding="utf-8"
+    )
+    print(
+        "applied %d merge(s), %d ignore(s), %d acronym(s) to %s"
+        % (applied_merges, applied_ignores, applied_acros, corrections_path)
+    )
+    if args.no_rebuild:
+        print("run 'rebuild' when ready to regenerate the graph.")
+        return 0
+    ner_log, kg = _open_stores()
+    try:
+        result = pipeline.rebuild(
+            config.CORPUS_FILE,
+            ner_log,
+            kg,
+            ner_backend=args.ner,
+            corrections=reconcile.load_corrections(CORRECTIONS_FILE),
+            log=_log,
+        )
+    finally:
+        ner_log.close()
+        kg.close()
+    print(json.dumps({"rebuilt": result["graph"]}, indent=2))
+    return 0
+
+
+def _ask_yes(force_yes, prompt):
+    """Y/N prompt that respects an interactive --yes override."""
+    if force_yes:
+        return True
+    try:
+        answer = input(prompt + " [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in ("y", "yes")
 
 
 def cmd_enrich(args):
@@ -645,9 +780,14 @@ def build_parser():
     sub.add_parser("stats", help="show corpus and database statistics").set_defaults(
         func=cmd_stats
     )
-    sub.add_parser(
+    overview_p = sub.add_parser(
         "overview", help="print a statistical overview of the data"
-    ).set_defaults(func=cmd_overview)
+    )
+    overview_p.add_argument(
+        "--diff", action="store_true",
+        help="show run-over-run KPI deltas instead of the full overview",
+    )
+    overview_p.set_defaults(func=cmd_overview)
 
     brief_p = sub.add_parser(
         "briefing", help="print a generated briefing of the landscape"
@@ -715,6 +855,35 @@ def build_parser():
         help="merge: <surface form> <canonical name>;  ignore: <surface form>",
     )
     correct_p.set_defaults(func=cmd_correct)
+
+    from_review_p = sub.add_parser(
+        "correct-from-review",
+        help="walk review.json suggestions and bulk-apply approved ones",
+    )
+    from_review_p.add_argument(
+        "--merges", action="store_true",
+        help="apply partial-name merge suggestions from review.json",
+    )
+    from_review_p.add_argument(
+        "--ignores", action="store_true",
+        help="apply structural-noise ignore suggestions from review.json",
+    )
+    from_review_p.add_argument(
+        "--acronyms", action="store_true",
+        help="apply corroborated acronym ↔ expansion mappings from review.json",
+    )
+    from_review_p.add_argument(
+        "--yes", "-y", action="store_true",
+        help="auto-approve every suggestion (no per-item prompt)",
+    )
+    from_review_p.add_argument(
+        "--no-rebuild", action="store_true",
+        help="write corrections.json but skip the rebuild — run 'rebuild' later",
+    )
+    from_review_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None,
+    )
+    from_review_p.set_defaults(func=cmd_correct_from_review)
 
     serve_p = sub.add_parser("serve", help="run the interactive web app")
     serve_p.add_argument("--port", type=int, default=8000)

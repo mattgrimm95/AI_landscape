@@ -138,8 +138,20 @@ def normalize(text):
     return (head + " " + last) if head else last
 
 
+# Characters that almost always indicate a malformed entity surface — math
+# operators or code-bracket characters that NER can scoop up off a CamelCase
+# identifier or a math-laden snippet ("A=2 B=3 C=4", "Use ArrayBuffer").
+# Curly braces and square brackets normally get stripped by `_clean`, but
+# they survive when attached to a token without a delimiting space.
+_BAD_SURFACE_CHARS = re.compile(r"[=<>{}\[\]/]")
+
+
 def _is_noise(alias):
-    return len(alias) < 3 or alias.isdigit()
+    if len(alias) < 3 or alias.isdigit():
+        return True
+    if _BAD_SURFACE_CHARS.search(alias):
+        return True
+    return False
 
 
 def load_corrections(path):
@@ -155,6 +167,69 @@ def load_corrections(path):
     merge = {normalize(k): v for k, v in data.get("merge", {}).items()}
     ignore = {normalize(x) for x in data.get("ignore", [])}
     return merge, ignore
+
+
+def _coreference_by_email(nodes):
+    """Detect shared-email person merges (source key -> target key).
+
+    Some scraped author/byline pages give us a person's email address as a
+    structured attribute (see `_split_attributes`). When two distinct person
+    nodes share the same email — typically the same individual referred to
+    with slightly different name forms across documents ("J. Smith" /
+    "Jane Smith") — they're the same person, and the surname-based
+    `_coreference` rule won't always catch them (e.g. when both names have
+    multiple words, or when the surname collides with another person's).
+
+    The rules:
+      * the email must be non-empty AND must look like a personal address
+        (not a shared inbox: "info@", "contact@", "press@", "support@"
+        are skipped),
+      * exactly the multi-mention winner survives; every other person node
+        with that email folds into it,
+      * the source must be a person node — emails on org nodes (rare, but
+        possible) are not merge signals.
+
+    Returns ``{source_key: target_key, ...}`` for the merge engine to
+    apply alongside `_coreference`'s output.
+    """
+    by_email = {}
+    for key, node in nodes.items():
+        if node.get("type") != "person":
+            continue
+        email = (node.get("attributes") or {}).get("email") or ""
+        email = email.strip().lower()
+        if not email:
+            continue
+        local = email.split("@", 1)[0]
+        if local in _SHARED_MAILBOX_LOCALS:
+            continue
+        by_email.setdefault(email, []).append(key)
+
+    merge_into = {}
+    for email, keys in by_email.items():
+        if len(keys) < 2:
+            continue
+        winner = max(
+            keys,
+            key=lambda k: (
+                nodes[k]["mentions"],
+                len(nodes[k]["canonical"]),
+                k,  # final tiebreaker: deterministic
+            ),
+        )
+        for k in keys:
+            if k != winner:
+                merge_into[k] = winner
+    return merge_into
+
+
+# Shared / role inboxes that should never act as a person-identity signal —
+# multiple distinct people legitimately appear under "press@…" or "info@…".
+_SHARED_MAILBOX_LOCALS = frozenset({
+    "info", "contact", "press", "media", "support", "help", "sales",
+    "admin", "office", "team", "noreply", "no-reply", "donotreply",
+    "hello", "hi", "general", "communications", "comms", "pr",
+})
 
 
 def _coreference(nodes):
@@ -253,6 +328,14 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             # Page-chrome metadata leak ("Website Keywords", "Subscribe
             # Newsletter", etc.) — never a real entity.
             return None
+        if _BAD_SURFACE_CHARS.search(clean_text):
+            # Math operators and code-bracket characters in an entity
+            # surface mean it came from a CamelCase identifier or a
+            # formula ("A=2 B=3 C=4"), not from real prose. The
+            # normalize() pass strips them, so this is the only place
+            # the signal is still visible — reject before the alias
+            # collapses to "a 2 b 3 c 4".
+            return None
         alias = normalize(clean_text)
         if not alias or alias in ignore or _is_noise(alias):
             return None
@@ -326,8 +409,15 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             )
 
     # Step 4b: coreference — fold partial names into their fuller node, then
-    # re-point that node's edges (dropping the resulting self-loops).
+    # re-point that node's edges (dropping the resulting self-loops). Two
+    # passes: surname / first-word matching (the conservative `_coreference`
+    # rule), then shared-email merging for person nodes whose name forms the
+    # surname rule did not catch (e.g. two multi-word variants of the same
+    # author byline). The email pass runs after `_coreference` so it operates
+    # on the already-merged person nodes; both contribute to a single
+    # combined `merge_into` map applied below.
     merge_into = _coreference(nodes)
+    merge_into.update(_coreference_by_email(nodes))
     for src_key, tgt_key in merge_into.items():
         src = nodes.get(src_key)
         tgt = nodes.get(tgt_key)

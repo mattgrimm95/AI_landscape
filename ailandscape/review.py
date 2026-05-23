@@ -20,7 +20,7 @@ import json
 import pathlib
 import re
 
-from . import gazetteer
+from . import acronyms, corpus as corpus_mod, gazetteer
 
 # Canonical names that the curated gazetteer trusts. Used by the noise
 # detector to skip "looks like a version tag" suggestions for real model /
@@ -167,6 +167,9 @@ def build_review(documents, kg_store):
             })
     noise_suggestions.sort(key=lambda n: n["name"].lower())
 
+    gazetteer_candidates = _gazetteer_candidates(nodes)
+    acronym_suggestions = _acronym_suggestions(documents)
+
     singletons = sum(1 for n in nodes if n["mention_count"] <= 1)
     return {
         "documents": len(documents),
@@ -174,7 +177,89 @@ def build_review(documents, kg_store):
         "singletons": singletons,
         "merge_suggestions": merge_suggestions,
         "noise_suggestions": noise_suggestions,
+        "gazetteer_candidates": gazetteer_candidates,
+        "acronym_suggestions": acronym_suggestions,
     }
+
+
+def _acronym_suggestions(documents):
+    """Mine the corpus for ``<Expansion> (<ACRONYM>)`` definitional
+    appositions and surface those corroborated across multiple documents.
+
+    The gate (``acronyms.MIN_DOC_FREQ``) is what makes this safe to act
+    on without human review of every pair: an acronym mapping written by
+    two or more independent authors using the exact same expansion is
+    very unlikely to be a coincidence. Curated entries land in
+    `corrections.json` via `correct merge`, the same path partial-name
+    merges take.
+    """
+    per_doc = []
+    for doc in documents:
+        text = corpus_mod.document_text(doc)
+        per_doc.append(acronyms.extract_pairs(text))
+    return acronyms.aggregate(per_doc)
+
+
+# Thresholds for promoting a high-frequency misc-typed node into the
+# gazetteer-candidate list. Curating a node into the gazetteer ties it to a
+# canonical name + entity type, so the bar is intentionally higher than the
+# `_MIN_SINGLE_WORD_DF=2` floor reconcile uses to keep nodes in the graph at
+# all. A multi-word node hitting both thresholds has demonstrated that the
+# corpus treats it as a real, named thing across multiple independent docs.
+_GAZETTEER_CANDIDATE_MIN_DOCS = 3
+_GAZETTEER_CANDIDATE_MIN_MENTIONS = 5
+
+# Limit the surfaced list to keep `review.json` from ballooning on the first
+# run after a large gazetteer-coverage gap; curator picks from the top of
+# this list and the rest will resurface next run.
+_GAZETTEER_CANDIDATE_CAP = 50
+
+
+def _gazetteer_candidates(nodes):
+    """High-frequency multi-word `misc` nodes not yet in the gazetteer.
+
+    These are the entities the curator would most want to type and
+    canonicalize: real-looking proper nouns that the corpus mentions
+    repeatedly but that the gazetteer hasn't categorized yet. Surfacing
+    them in `review.json` closes the curation loop — until now the
+    gazetteer only grew when a human noticed an uncategorized hub by hand.
+
+    Filter rules:
+      * Type must be `misc` (the typed buckets — person/organization/place
+        — already have a sensible category; the curator's value-add is on
+        the misc bucket).
+      * Multi-word (single-word `misc` is too prone to common-noun noise).
+      * `document_count >= _GAZETTEER_CANDIDATE_MIN_DOCS` and
+        `mention_count >= _GAZETTEER_CANDIDATE_MIN_MENTIONS` — both
+        thresholds because mentions concentrated in one document are
+        often boilerplate, while spread across few docs with low mentions
+        is often a trace reference.
+      * The canonical name (case-folded) must not already be a gazetteer
+        canonical, so the same suggestion doesn't surface every run.
+    """
+    seen = {canonical.lower() for canonical, _ in gazetteer.GAZETTEER.values()}
+    cands = []
+    for node in nodes:
+        name = node.get("canonical_name") or ""
+        if " " not in name:
+            continue
+        if node.get("type") != "misc":
+            continue
+        if name.lower() in seen:
+            continue
+        docs = int(node.get("document_count", 0) or 0)
+        mentions = int(node.get("mention_count", 0) or 0)
+        if (docs < _GAZETTEER_CANDIDATE_MIN_DOCS
+                or mentions < _GAZETTEER_CANDIDATE_MIN_MENTIONS):
+            continue
+        cands.append({
+            "name": name,
+            "document_count": docs,
+            "mention_count": mentions,
+        })
+    # Highest-impact first: mentions first, then docs as tiebreaker.
+    cands.sort(key=lambda c: (-c["mention_count"], -c["document_count"], c["name"].lower()))
+    return cands[:_GAZETTEER_CANDIDATE_CAP]
 
 
 def render_review(data):
@@ -206,6 +291,35 @@ def render_review(data):
     if not noise:
         out.append("  (none)")
 
+    gaz = data.get("gazetteer_candidates", [])
+    out += ["", "GAZETTEER CANDIDATES (%d)" % len(gaz)]
+    out.append("  (high-frequency misc nodes not yet in the gazetteer)")
+    for c in gaz[:30]:
+        out.append(
+            '  "%s"  %d mentions / %d docs'
+            % (c["name"], c["mention_count"], c["document_count"])
+        )
+    if len(gaz) > 30:
+        out.append("  ... and %d more (see review.json)" % (len(gaz) - 30))
+    if not gaz:
+        out.append("  (none)")
+
+    acros = data.get("acronym_suggestions", [])
+    out += ["", "ACRONYM ↔ EXPANSION SUGGESTIONS (%d)" % len(acros)]
+    out.append(
+        "  (definitional appositions corroborated across ≥%d documents)"
+        % acronyms.MIN_DOC_FREQ
+    )
+    for a in acros[:30]:
+        out.append(
+            '  %s  =  "%s"   (%d docs)'
+            % (a["acronym"], a["expansion"], a["documents"])
+        )
+    if len(acros) > 30:
+        out.append("  ... and %d more (see review.json)" % (len(acros) - 30))
+    if not acros:
+        out.append("  (none)")
+
     out.append(bar)
     return "\n".join(out)
 
@@ -218,15 +332,25 @@ def save_review(data, path):
     runs. Returns the number of newly added suggestions.
     """
     p = pathlib.Path(path)
-    store = {"suggested_merges": [], "suggested_ignores": [], "history": []}
+    store = {
+        "suggested_merges": [],
+        "suggested_ignores": [],
+        "gazetteer_candidates": [],
+        "history": [],
+    }
     if p.exists():
         try:
             store = json.loads(p.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            store = {"suggested_merges": [], "suggested_ignores": [],
-                     "history": []}
+            store = {
+                "suggested_merges": [],
+                "suggested_ignores": [],
+                "gazetteer_candidates": [],
+                "history": [],
+            }
     store.setdefault("suggested_merges", [])
     store.setdefault("suggested_ignores", [])
+    store.setdefault("gazetteer_candidates", [])
     store.setdefault("history", [])
 
     seen_merges = {(s["from"], s["into"]) for s in store["suggested_merges"]}
@@ -246,11 +370,20 @@ def save_review(data, path):
             seen_ignores.add(suggestion["name"])
             new_ignores += 1
 
+    # Gazetteer candidates and acronym suggestions are *refreshed* (not
+    # merged) every run: the curator either acts on them now or they evolve
+    # as the corpus does, and an accumulating list would carry stale
+    # entries that have since dropped below the doc-frequency floor.
+    store["gazetteer_candidates"] = list(data.get("gazetteer_candidates", []))
+    store["acronym_suggestions"] = list(data.get("acronym_suggestions", []))
+
     store["history"].append({
         "nodes": data["nodes"],
         "singletons": data["singletons"],
         "new_merges": new_merges,
         "new_ignores": new_ignores,
+        "gazetteer_candidates": len(store["gazetteer_candidates"]),
+        "acronym_suggestions": len(store["acronym_suggestions"]),
     })
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
