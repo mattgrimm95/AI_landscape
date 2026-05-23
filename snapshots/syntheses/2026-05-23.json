@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-23",
+  "generated_at": "2026-05-23T14:03:58+00:00",
+  "corpus_mtime": "2026-05-23T04:27:11+00:00",
+  "corpus_documents": 426,
+  "hype": {
+    "available": true,
+    "text": "NATO just put Palantir's Maven Smart System at the heart of Allied Command Operations -- 20,000+ users across 35 military tools, with the DoD ceiling lifted to $1.3 billion and a program-of-record designation now locked. The Army went bigger: a $10B enterprise agreement consolidating Palantir software across the service. Anduril's Lattice landed an $86M SOCOM autonomy contract and a parallel $20B+ Army integration deal. General Atomics' CCA drone wingman is back in the air after April's crash. Lockheed broke ground on a THAAD plant that quadruples interceptor production. F-35Bs flew first tests with British SPEAR cruise missiles. Trump deployed 5,000 troops to Poland. Google DeepMind shipped Antigravity; OpenAI quietly bought Tomoro. The pattern: AI-enabled targeting moving from prototype to program-of-record, with the industrial base finally tooling up to feed it.",
+    "window_days": 1,
+    "documents_used": 47,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "The corpus's 426 documents and 370 typed relationships concentrate on three structural shifts. First, software-enabled targeting consolidates around Palantir's Maven Smart System -- NATO acquisition, a $1.3 billion DoD ceiling, and a $10 billion Army enterprise agreement signal program-of-record permanence rather than experimentation. Second, autonomy contracts move to multi-billion enterprise vehicles: SOCOM's $86M Mission Autonomy deal with Anduril and the Army's parallel $20B+ Lattice agreement consolidate what were 120+ separate procurements. Third, the industrial base is rebuilding: Lockheed breaks ground on a 4x THAAD production line, IAI unveils Diamond containerized naval munitions, General Atomics returns its CCA wingman to flight after the April crash, and Navy advances seven MUSV prototypes. Trending AI topics -- reinforcement learning, electronic warfare, collaborative combat aircraft, Golden Dome -- all point at fielded systems rather than capability demos. Key participants this week: Palantir, Anduril, NATO, the U.S. Army, U.S. Navy, Lockheed Martin, Google DeepMind, and OpenAI.",
+    "window_days": 7,
+    "documents_used": 426,
+    "error": ""
+  }
+}
