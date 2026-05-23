@@ -34,18 +34,58 @@ def _edge_meta(edge):
         return {}
 
 
-def build_briefing(documents, kg_store, days=7, now=None):
+def build_briefing(documents, kg_store, days=7, now=None, subfield_concepts=None):
     """Compute the briefing digest from the corpus documents and the graph.
 
     `days` sets the recency window for the "recent documents" section; the
     entity, topic, and relationship sections summarise the whole graph.
     `now` is injectable so tests are deterministic.
+
+    When `subfield_concepts` is given (a collection of canonical concept
+    names from `gazetteer.SUBFIELDS`), the briefing is scoped to that
+    subfield: every node, edge, and document considered must touch one of
+    those concepts. The result is the same shape as the full briefing —
+    just narrower — so the "What's happening in <subfield>" view reuses
+    the whole render path with no code duplication.
     """
     now = now or _now()
     cutoff = (now - datetime.timedelta(days=days)).isoformat()
     nodes = kg_store.nodes()
     edges = kg_store.edges()
     by_id = {n["id"]: n for n in nodes}
+
+    if subfield_concepts:
+        concept_set = {c.lower() for c in subfield_concepts}
+        scope_ids = {
+            n["id"] for n in nodes
+            if n["canonical_name"].lower() in concept_set
+        }
+        # A node is in scope if it IS a subfield concept or shares an edge
+        # with one. This pulls in the orgs/people/products active in the
+        # subfield without forcing every match to be a concept itself.
+        connected = set(scope_ids)
+        for e in edges:
+            if e["src_id"] in scope_ids:
+                connected.add(e["dst_id"])
+            if e["dst_id"] in scope_ids:
+                connected.add(e["src_id"])
+        nodes = [n for n in nodes if n["id"] in connected]
+        edges = [
+            e for e in edges
+            if e["src_id"] in connected and e["dst_id"] in connected
+        ]
+        by_id = {n["id"]: n for n in nodes}
+        # Filter documents to those mentioning any in-scope entity. Reuses
+        # `node_documents` indirectly: a doc is in scope if it's a source
+        # for any typed edge whose endpoints are in scope, OR if it's
+        # already attached to a subfield concept's document list. Simpler
+        # heuristic: a doc whose raw_text contains any subfield concept
+        # name. Trafilatura-extracted bodies make this reliable enough.
+        documents = [
+            d for d in documents
+            if any(c in (d.get("raw_text") or "").lower()
+                   for c in concept_set)
+        ]
 
     recent = sorted(
         (d for d in documents if (d.get("fetched_at") or "") >= cutoff),
@@ -129,6 +169,7 @@ def build_briefing(documents, kg_store, days=7, now=None):
         ],
         "top_entities": [
             {
+                "id": n["id"],
                 "name": n["canonical_name"],
                 "type": n["type"],
                 "mentions": n["mention_count"],
@@ -136,7 +177,11 @@ def build_briefing(documents, kg_store, days=7, now=None):
             for n in by_mentions[:10]
         ],
         "trending_topics": [
-            {"name": n["canonical_name"], "mentions": n["mention_count"]}
+            {
+                "id": n["id"],
+                "name": n["canonical_name"],
+                "mentions": n["mention_count"],
+            }
             for n in concepts[:10]
         ],
         "contract_awards": events[:12],

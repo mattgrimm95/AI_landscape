@@ -118,3 +118,63 @@ def summarize_briefing(briefing_data, max_tokens=700):
     return _call_anthropic(
         _briefing_prompt(briefing_data), max_tokens=max_tokens
     )
+
+
+def _hype_prompt(documents, sbir_funding):
+    """Build a "hype" prompt from the most recent day's documents.
+
+    The prompt asks for an energetic, 30-second-read style summary — the
+    opposite tone from the analyst-briefing prompt. Same data-only
+    discipline: the model is told to use only the facts it's handed, so a
+    quiet news day still produces a sober (but lively) summary instead of
+    invented excitement.
+    """
+    lines = [
+        "You are an enthusiastic AI/defense-tech journalist.",
+        "Write a SHORT, exciting, 30-second read (120-160 words max)",
+        "that hypes up the reader about AI right now — concrete momentum,",
+        "specific breakthroughs, named players, real deals.",
+        "Lead with the single most exciting thing. Be vivid and direct.",
+        "Use ONLY the facts in the headlines below — do not invent.",
+        "If the day is quiet, say so plainly and pick the most notable item.",
+        "No bullet points. No section headers. One flowing piece of prose.",
+        "",
+        "Today's headlines (most recent first):",
+    ]
+    if not documents:
+        lines.append("  (no documents in the recent window)")
+    for doc in documents[:18]:
+        title = (doc.get("title") or "").strip()
+        source = (doc.get("source") or "").strip()
+        if not title:
+            continue
+        snippet = (doc.get("raw_text") or "").strip().replace("\n", " ")
+        snippet = snippet[:220]
+        lines.append("  - %s [%s]" % (title, source))
+        if snippet:
+            lines.append("      %s" % snippet)
+    if sbir_funding and sbir_funding.get("awards"):
+        lines.append("")
+        lines.append(
+            "Tracked SBIR/STTR funding total: $%s across %d AI-related awards."
+            % (
+                format(int(sbir_funding.get("total_amount", 0)), ",d"),
+                sbir_funding["awards"],
+            )
+        )
+    return "\n".join(lines)
+
+
+def summarize_hype(documents, sbir_funding=None, max_tokens=400):
+    """Return an exciting, 30-second-read hype summary of recent AI news.
+
+    `documents` should be the most recent day's (or few days') docs from
+    the corpus — caller-selected so this stays single-purpose. Raises
+    SynthesisError if no key is configured or the call fails. The shape
+    matches `summarize_briefing` for symmetry; callers handle the
+    graceful no-op via `is_configured()`.
+    """
+    return _call_anthropic(
+        _hype_prompt(documents, sbir_funding or {}),
+        max_tokens=max_tokens,
+    )

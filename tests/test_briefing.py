@@ -81,5 +81,56 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("Anduril", text)
 
 
+class SubfieldBriefingTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.kg = KnowledgeGraphStore(os.path.join(self.tmp, "kg.db"))
+        llm = self.kg.insert_node(
+            "Large Language Models", "concept", mention_count=50,
+        )
+        ai = self.kg.insert_node(
+            "Artificial Intelligence", "concept", mention_count=80,
+        )
+        anthropic = self.kg.insert_node(
+            "Anthropic", "organization", mention_count=20,
+        )
+        anduril = self.kg.insert_node(
+            "Anduril", "organization", mention_count=15,
+        )
+        # Anthropic co-occurs with the subfield concept; Anduril does not.
+        self.kg.insert_edge(anthropic, llm, "co_occurs_with", 8)
+        self.kg.insert_edge(anduril, ai, "co_occurs_with", 6)
+        self.kg.commit()
+        self.now = datetime.datetime(
+            2026, 5, 22, tzinfo=datetime.timezone.utc
+        )
+        self.docs = [
+            {"title": "About LLMs", "source": "TechCrunch",
+             "raw_text": "Large language models reshape industries.",
+             "fetched_at": "2026-05-20T00:00:00+00:00"},
+            {"title": "Drone deal", "source": "Breaking Defense",
+             "raw_text": "Anduril delivers more drones.",
+             "fetched_at": "2026-05-21T00:00:00+00:00"},
+        ]
+
+    def tearDown(self):
+        self.kg.close()
+
+    def test_subfield_scopes_entities_and_documents(self):
+        b = briefing.build_briefing(
+            self.docs, self.kg, days=7, now=self.now,
+            subfield_concepts=["Large Language Models"],
+        )
+        # Anduril doesn't touch the subfield → out of scope.
+        names = {e["name"] for e in b["top_entities"]}
+        self.assertIn("Large Language Models", names)
+        self.assertIn("Anthropic", names)
+        self.assertNotIn("Anduril", names)
+        # Only the doc mentioning the subfield concept is in scope.
+        titles = {d["title"] for d in b["recent_documents"]}
+        self.assertIn("About LLMs", titles)
+        self.assertNotIn("Drone deal", titles)
+
+
 if __name__ == "__main__":
     unittest.main()

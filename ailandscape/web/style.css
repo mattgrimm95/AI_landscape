@@ -563,6 +563,366 @@ details.pair-filter label { font-size: 12px; }
   line-height: 1.5;
 }
 
+/* ---- sidebar groups (EXPLORE / TRACK / TOOLS) ---- */
+.sidebar-group {
+  margin-bottom: 14px;
+}
+.sidebar-group > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 4px 7px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+  /* Subtle hover, no background fill — keeps the chrome quiet. */
+}
+.sidebar-group > summary::-webkit-details-marker { display: none; }
+.sidebar-group > summary::marker { content: ""; }
+.sidebar-group > summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 10px;
+  margin-right: 6px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.sidebar-group[open] > summary::before { transform: rotate(90deg); }
+.sidebar-group .group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  flex: 1;
+}
+.sidebar-group .group-hint {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* ---- pulse strip (always-visible signal under the topbar) ---- */
+#pulse {
+  display: flex;
+  gap: 1px;
+  padding: 0;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+#pulse .pulse-card {
+  flex: 1;
+  background: var(--panel);
+  padding: 6px 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+  min-width: 0;
+}
+#pulse .pulse-card:hover { background: var(--panel-2); }
+#pulse .pulse-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+#pulse .pulse-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+#pulse .pulse-sub {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* ---- welcome overlay (first-visit choice card) ---- */
+#welcome { position: fixed; inset: 0; z-index: 70; }
+#welcome[hidden] { display: none; }
+#welcome-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.74);
+}
+#welcome-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 26px 28px 22px;
+}
+#welcome-card h2 { font-size: 20px; margin-bottom: 8px; }
+#welcome-card p { font-size: 13px; line-height: 1.55; margin-bottom: 6px; color: var(--text); }
+#welcome-card p.welcome-q { color: var(--muted); margin-top: 14px; margin-bottom: 10px; }
+#welcome-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 22px;
+  padding: 2px 6px;
+  flex: none;
+}
+#welcome-close:hover { color: var(--text); }
+#welcome-choices { display: flex; flex-direction: column; gap: 8px; }
+.welcome-choice {
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 14px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.welcome-choice:hover { border-color: var(--accent); }
+.welcome-choice .wc-title { font-weight: 600; font-size: 14px; }
+.welcome-choice .wc-sub { color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+/* ---- 3-step tutorial bubble ---- */
+#tutorial { position: fixed; inset: 0; z-index: 65; pointer-events: none; }
+#tutorial[hidden] { display: none; }
+#tutorial-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 16px 12px;
+  width: min(420px, 92vw);
+  pointer-events: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+#tutorial-step {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+#tutorial-step b { color: var(--accent); }
+.tutorial-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.tutorial-actions button { padding: 5px 14px; flex: none; }
+
+/* ---- spike (↑) badge — used in entity rows site-wide ---- */
+.spike-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #e08a3c;
+  margin-left: 4px;
+  vertical-align: middle;
+  cursor: help;
+}
+
+/* ---- "you may not know" / adjacent territory ---- */
+.adjacent-list { list-style: none; margin: 4px 0 8px; }
+.adjacent-list li {
+  padding: 4px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.adjacent-list li:hover { background: var(--panel-2); }
+.adjacent-list li em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* ---- capabilities modal cards ---- */
+.cap-cards { display: flex; flex-direction: column; gap: 10px; }
+.cap-card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.cap-card-head { margin-bottom: 8px; }
+.cap-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cap-card-tagline {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.cap-card-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.cap-card-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 8px;
+}
+@media (max-width: 760px) {
+  .cap-card-body { grid-template-columns: 1fr; }
+}
+.cap-card h4 {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.cap-list { list-style: none; }
+.cap-list li {
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cap-list li:hover { background: var(--panel); }
+.cap-list li em { color: var(--muted); font-style: normal; }
+.cap-card-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+.cap-card-actions button {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+/* ---- trajectory modal ---- */
+.traj-table {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr 1fr;
+  gap: 0;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.traj-table .th, .traj-table .td {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line);
+}
+.traj-table .th {
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.traj-table .td.month { color: var(--accent); font-weight: 600; }
+.traj-table .td:last-child, .traj-table .th:last-child { border-right: 0; }
+.traj-row:last-child .td { border-bottom: 0; }
+.traj-row {
+  display: contents;
+}
+.traj-row .td-mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.traj-row .td-mini-bar .bar-track {
+  flex: 1;
+  background: var(--bg);
+  border-radius: 3px;
+  height: 8px;
+  overflow: hidden;
+}
+.traj-row .td-mini-bar .bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.traj-row .td-mini-bar .val { color: var(--text); min-width: 30px; text-align: right; }
+.traj-types {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.traj-types .legend-chip {
+  display: inline-block;
+  font-size: 11px;
+  margin-right: 10px;
+}
+.traj-types .legend-chip .dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+/* ---- briefing-window tabs ---- */
+.briefing-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 6px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.briefing-tab {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.briefing-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.briefing-tab:hover { color: var(--text); }
+
+/* ---- mini sparkline for the detail panel ---- */
+.mini-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 22px;
+  margin: 6px 0 8px;
+}
+.mini-spark .mini-bar {
+  flex: 1;
+  background: var(--accent);
+  opacity: 0.55;
+  border-radius: 1px;
+  min-height: 1px;
+}
+.mini-spark-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* ---- mobile: reading-first surfaces reflow on narrow screens ----
  *
  * The graph itself stays desktop-only (Cytoscape is heavy and pinch-zoom

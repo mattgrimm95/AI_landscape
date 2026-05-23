@@ -476,3 +476,101 @@ curator-loop velocity. What landed and why:
 - 50 new tests total; 220 pass (3 skipped — spaCy-dependent), up from a
   170-test baseline.
 
+## 2026-05-23 — Knowledge-graph & GUI UX improvements (14-item batch)
+
+A coordinated set of frontend + supporting backend changes so a new
+visitor can rapidly start learning about the AI national-security
+landscape, an AI expert can find topics they know are big, and a
+returning visitor can see what's moved over many months. Applied the
+"simple and clean as features are added" principle throughout: the
+sidebar was reorganized into three collapsible groups (EXPLORE / TRACK
+/ TOOLS) so adding new panels didn't compound vertical clutter.
+
+### Onboarding
+- **Welcome overlay** (first visit): replaces the briefing auto-open
+  with a small choice card — *Hype me up about AI / 60-second tour /
+  Browse AI capabilities / Read today's briefing / Just show me the
+  graph*. Dismissed-once via `ail_welcome_seen`. Skipping straight to
+  "explore" triggers the 3-step tutorial bubble.
+- **3-step tutorial**: a small bubble that walks a fresh visitor through
+  click-a-node → hover-an-edge → try-a-tour. Dismissable.
+
+### Discovery
+- **Adjacent territory** in the detail panel: a "You may not know
+  about" list of entities two hops away (powered by
+  `/api/node/{id}/adjacent`), ranked by shared intermediate neighbors.
+- **"Surprise me" topbar button**: picks a high-mention entity the user
+  hasn't focused on this session (tracked in `ail_seen_entities`
+  localStorage), focuses the graph + opens the dossier.
+- **Spike detection** (`trends.build_spikes`): entities whose recent
+  30d mention rate is ≥3× their long-term baseline with ≥5 recent
+  mentions, scoped to typed entities (excludes `misc` to keep noise
+  out) and requiring ≥60 days of active span (so newly-appeared nodes
+  go through the existing "newly appeared" channel, not here). Surfaced
+  via `/api/spikes`; the frontend stamps a small "↑" badge on every
+  matching entity row site-wide.
+
+### Topic finding for AI experts
+- **Capability taxonomy** (`gazetteer.SUBFIELDS`): 8 hand-curated
+  subfields (Foundation models, Machine learning, Perception, Autonomy,
+  ISR & C2, Cyber & EW, Directed energy, Defense AI programs) mapping
+  concept entities to the subfields a defense / AI reader thinks in.
+  No overlap (asserted by test). New concepts in the gazetteer get
+  picked up by adding them to a subfield list.
+- **Capabilities modal**: one card per subfield with the leading concept
+  nodes on the left, top organizations (ranked by total co-occurrence
+  weight with subfield concepts) on the right, plus *What's happening
+  here* and *Focus graph* actions per card. Backed by
+  `/api/capabilities` and the new `capabilities.build_capabilities`.
+- **Subfield-scoped briefing**: `briefing.build_briefing` accepts a
+  `subfield_concepts` arg; the new `subfield` query param on
+  `/api/briefing` scopes entities + docs + relations to one capability
+  area without code duplication.
+
+### Recent advancements
+- **Pulse strip** in the header: always-visible row of three cards —
+  new entities in the last 7 days, top trending spike, total tracked
+  SBIR funding. Each card click opens the most relevant view.
+- **Time-sliced briefing tabs** (24h / 7d / 30d): a tab bar at the top
+  of the briefing modal switches the recency window in place.
+
+### Strategic / longitudinal
+- **Trajectory modal**: 12 months of corpus activity at a glance —
+  documents, new entities, typed relations per month with a stacked-bar
+  visualization, plus a legend of new entities by type. Backed by
+  `/api/trajectory` and the new `trends.build_trajectory`.
+- **Inline mini-sparkline** in the sidebar detail panel: 12-cell
+  monthly bar chart shown immediately on node click (no need to open
+  the full dossier modal for the trend signal).
+
+### "Today's spotlight" (Claude-powered hype read)
+- A 30-second exciting read of the most recent day's news. New
+  `synthesis.summarize_hype` builds an upbeat journalist-style prompt
+  from the last-24h documents (with a 3-day soft fallback for quiet
+  windows) and SBIR funding totals; `/api/hype` returns
+  `available=False` without an `ANTHROPIC_API_KEY` so the topbar
+  button and welcome card always show the feature without ever
+  attempting the call. Exposed via a `Today's spotlight` topbar
+  button and the *Hype me up about AI ⚡* welcome card option.
+
+### Sidebar reorganization
+- Three labelled `<details>` groups: **EXPLORE** (Start here, Story
+  tours, Search), **TRACK** (What changed, Connection, Overview),
+  **TOOLS** (View filters, Legend). Each collapsible. Reduces the
+  vertical-scroll burden the original 9-panel stack imposed on a
+  first-time visitor.
+
+### Test rigor
+- `tests/test_capabilities.py` covers the subfield index + the
+  no-overlap invariant on the curated taxonomy.
+- `tests/test_trends.py` adds spike-detection cases (long-lived surge,
+  brand-new entity, misc exclusion, min-recent floor) and trajectory
+  bucketing.
+- `tests/test_briefing.py` adds a subfield-scoping case.
+- `tests/test_synthesis.py` adds hype cases (no-key error, prompt
+  carries headlines + SBIR total, quiet-day fallback).
+- `tests/test_server.py` adds endpoint coverage for capabilities,
+  trajectory, spikes, pulse, adjacent, hype, and briefing-with-subfield.
+- 245 tests pass (3 skipped — spaCy-dependent); up from 220.
+
+

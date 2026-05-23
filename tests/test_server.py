@@ -184,6 +184,69 @@ class ServerApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("AI Landscape", resp.text)
 
+    def test_capabilities_endpoint(self):
+        body = self.client.get("/api/capabilities").json()
+        self.assertIn("subfields", body)
+        # All curated subfields are surfaced (even those with no live nodes).
+        ids = {s["id"] for s in body["subfields"]}
+        self.assertIn("foundation_models", ids)
+        self.assertIn("autonomy", ids)
+
+    def test_trajectory_endpoint(self):
+        body = self.client.get("/api/trajectory?months=6").json()
+        self.assertEqual(len(body["months"]), 6)
+        for m in body["months"]:
+            self.assertIn("documents", m)
+            self.assertIn("new_entities", m)
+            self.assertIn("typed_relations", m)
+            self.assertIn("entity_type_counts", m)
+
+    def test_spikes_endpoint(self):
+        # The fixture corpus is too small to actually spike anything, but
+        # the endpoint must always respond with a (possibly empty) list.
+        body = self.client.get("/api/spikes?limit=5").json()
+        self.assertIn("spikes", body)
+        self.assertIsInstance(body["spikes"], list)
+
+    def test_pulse_endpoint(self):
+        body = self.client.get("/api/pulse").json()
+        self.assertIn("new_entities", body)
+        self.assertIn("top_spike", body)
+        self.assertIn("sbir_total_amount", body)
+        self.assertIn("new_entities_window_days", body)
+
+    def test_adjacent_endpoint(self):
+        graph = self.client.get("/api/graph?min_weight=1").json()
+        china_id = next(n["id"] for n in graph["nodes"] if n["label"] == "China")
+        body = self.client.get("/api/node/%d/adjacent" % china_id).json()
+        self.assertIn("adjacent", body)
+        # The fixture has only two nodes, so no 2-hop neighbors exist.
+        self.assertEqual(body["adjacent"], [])
+
+    def test_adjacent_endpoint_unknown_node_404(self):
+        self.assertEqual(
+            self.client.get("/api/node/999999/adjacent").status_code, 404
+        )
+
+    def test_hype_endpoint_no_key_returns_unavailable(self):
+        import os
+        orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            body = self.client.get("/api/hype").json()
+            self.assertFalse(body["available"])
+            self.assertIn("ANTHROPIC_API_KEY", body["message"])
+        finally:
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_briefing_subfield_filter(self):
+        body = self.client.get(
+            "/api/briefing?days=30&subfield=foundation_models"
+        ).json()
+        # The fixture has no foundation-model concepts, so the briefing
+        # shows zero in-scope entities — but must still respond cleanly.
+        self.assertEqual(body["totals"]["entities"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
