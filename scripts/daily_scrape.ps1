@@ -10,6 +10,13 @@
 
 $ErrorActionPreference = 'Continue'
 
+# Load the Anthropic key from the DPAPI-encrypted store written by
+# scripts\setup_anthropic_key.ps1. Idempotent and silent if the file
+# doesn't exist OR if $env:ANTHROPIC_API_KEY is already set by some
+# other means (so an operator who prefers `setx` is not forced onto
+# the DPAPI flow).
+. (Join-Path $PSScriptRoot 'load_anthropic_key.ps1')
+
 $repo = Split-Path -Parent $PSScriptRoot
 $log  = Join-Path $repo 'data\daily_scrape.log'
 
@@ -28,23 +35,26 @@ if (-not $python -or -not $git) {
     exit 1
 }
 
-# Pre-flight: capture whether ANTHROPIC_API_KEY is reaching this process.
-# Logged before the run so a missing-key day can be diagnosed by grep
-# instead of squinting at the python output for the "skipping" line.
+# Pre-flight: capture whether ANTHROPIC_API_KEY is reaching this process,
+# and where it came from (the DPAPI store loaded above, or some prior env
+# scope), so a missing-key day can be diagnosed by grep instead of
+# squinting at the python output for the "skipping" line.
+$dpapiFile = Join-Path $env:LOCALAPPDATA 'AILandscape\anthropic_api_key.dpapi'
 if ($env:ANTHROPIC_API_KEY) {
-    Write-Log "PREFLIGHT: ANTHROPIC_API_KEY present (length=$($env:ANTHROPIC_API_KEY.Length)); synthesis will be attempted."
+    $source = if (Test-Path $dpapiFile) { 'DPAPI store or pre-existing env' } else { 'pre-existing env' }
+    Write-Log "PREFLIGHT: ANTHROPIC_API_KEY present (length=$($env:ANTHROPIC_API_KEY.Length), source=$source); synthesis will be attempted."
 } else {
-    Write-Log 'PREFLIGHT: ANTHROPIC_API_KEY is NOT set in this process env; synthesis will be skipped.'
+    Write-Log "PREFLIGHT: ANTHROPIC_API_KEY is NOT set (no DPAPI store at $dpapiFile, no env var); synthesis will be skipped."
 }
 
 # 1. Scrape feeds into the corpus and rebuild the derived databases. The
 #    rebuild step also writes today's synthesis sidecar (hype + briefing
 #    narrative) to snapshots/syntheses/ if ANTHROPIC_API_KEY is set on
-#    this machine — a silent no-op otherwise.
+#    this machine -- a silent no-op otherwise.
 Write-Log ((& $python -m ailandscape.cli run 2>&1 | Out-String).TrimEnd())
 
 # Post-run synthesis verification: did today's snapshot land?
-# This is the unambiguous signal — a single grep target — so a future
+# This is the unambiguous signal -- a single grep target -- so a future
 # "I set the key but no snapshot appeared" can be diagnosed without
 # parsing the python JSON output. The snapshot filename is the UTC date
 # (matching ailandscape.synthesis_cache.snapshot_path).
@@ -54,9 +64,9 @@ if (Test-Path $snapshotPath) {
     Write-Log "SYNTHESIS: snapshot present at $snapshotPath (size=$($info.Length)B, mtime=$($info.LastWriteTime.ToString('HH:mm:ss')))"
 } else {
     if ($env:ANTHROPIC_API_KEY) {
-        Write-Log "SYNTHESIS: WARN — key was set but no snapshot was written at $snapshotPath. Check the python output above for the failure mode (rate-limit, network, etc.)."
+        Write-Log "SYNTHESIS: WARN -- key was set but no snapshot was written at $snapshotPath. Check the python output above for the failure mode (rate-limit, network, etc.)."
     } else {
-        Write-Log "SYNTHESIS: no snapshot written (expected — no key)."
+        Write-Log "SYNTHESIS: no snapshot written (expected -- no key)."
     }
 }
 
