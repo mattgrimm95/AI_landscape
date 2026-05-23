@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import (
-    briefing, capabilities, config, corpus, reconcile, report, synthesis,
-    tours, trends, visualize,
+    briefing, capabilities, config, corpus, pipeline, reconcile, report,
+    synthesis, synthesis_cache, tours, trends, visualize,
 )
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -635,99 +635,125 @@ def api_briefing(
         kg.close()
 
 
-@app.get("/api/hype")
-def api_hype(days: int = Query(1, ge=1, le=7)):
-    """An exciting, 30-second-read hype summary of the most recent day's news.
+# ---- LLM synthesis (cache-first) -------------------------------------------
+#
+# The hype + briefing-narrative syntheses are generated once a day by the
+# pipeline and saved as a sidecar JSON file under snapshots/syntheses/.
+# These endpoints serve from that sidecar, so:
+#   * Visitors without an ANTHROPIC_API_KEY still get the latest synthesis.
+#   * Each page view costs zero API calls — the daily run amortises the cost.
+#   * The synthesis is identical across visitors today, so a shared link
+#     means everyone sees the same read.
+# An operator with a key can trigger a regeneration via `?refresh=1`. The
+# UI hides the Refresh button for visitors who can't use it (the server
+# advertises `can_refresh` based on whether the key is set).
 
-    Pulls documents published or fetched within the last ``days`` days (a
-    soft fallback to 3 days kicks in when day 1 is empty so a quiet news
-    day still produces something), then asks Claude to write a short,
-    vivid hype piece. Strictly opt-in via ``ANTHROPIC_API_KEY`` — the
-    endpoint returns ``available=False`` (not an error) without a key so
-    the UI can render the feature without ever attempting the call.
-    """
-    if not synthesis.is_configured():
-        return {
-            "available": False,
-            "message": "Set ANTHROPIC_API_KEY to enable the daily hype read.",
-        }
-    documents = _cached_corpus()
-    today = datetime.date.today()
-    cutoff_main = today - datetime.timedelta(days=days)
-    cutoff_fallback = today - datetime.timedelta(days=3)
-    recent = []
-    for doc in documents:
-        date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
-        if not date_str:
-            continue
-        try:
-            doc_date = datetime.date.fromisoformat(date_str[:10])
-        except ValueError:
-            continue
-        if doc_date >= cutoff_main:
-            recent.append(doc)
-    if not recent:
-        # Soft fallback so a quiet 24-hour window still produces output.
-        for doc in documents:
-            date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
-            if not date_str:
-                continue
-            try:
-                doc_date = datetime.date.fromisoformat(date_str[:10])
-            except ValueError:
-                continue
-            if doc_date >= cutoff_fallback:
-                recent.append(doc)
-    # Most recent first; the prompt leans on the head of the list.
-    recent.sort(
-        key=lambda d: corpus.published_date(d)
-        or (d.get("fetched_at") or "")[:10],
-        reverse=True,
-    )
-    sbir_total = sum(
-        ((d.get("metadata") or {}).get("award_amount") or 0)
-        for d in documents
-        if (d.get("metadata") or {}).get("data_source") == "SBIR"
-    )
-    sbir_count = sum(
-        1 for d in documents
-        if (d.get("metadata") or {}).get("data_source") == "SBIR"
-    )
-    sbir_funding = {"awards": sbir_count, "total_amount": int(sbir_total)}
-    try:
-        hype = synthesis.summarize_hype(recent, sbir_funding=sbir_funding)
-    except synthesis.SynthesisError as exc:
-        return {"available": True, "error": str(exc)}
+def _serialize_section(section, snapshot_meta):
+    """Project one snapshot section onto the shape the API exposes."""
+    age_s = synthesis_cache.age_seconds(snapshot_meta)
     return {
-        "available": True,
-        "hype": hype,
-        "documents_used": len(recent),
-        "window_days": days,
+        "available": bool(section.get("available")),
+        "text": section.get("text", ""),
+        "error": section.get("error", ""),
+        "window_days": int(section.get("window_days") or 0),
+        "documents_used": int(section.get("documents_used") or 0),
+        "generated_at": snapshot_meta.get("generated_at", ""),
+        "corpus_documents_when_generated": int(
+            snapshot_meta.get("corpus_documents") or 0
+        ),
+        "age_seconds": int(age_s) if age_s is not None else None,
+        "age_hours": round(age_s / 3600.0, 1) if age_s is not None else None,
+        "is_stale": synthesis_cache.is_stale(snapshot_meta),
+        "can_refresh": synthesis.is_configured(),
     }
 
 
-@app.get("/api/briefing/narrative")
-def api_briefing_narrative(days: int = Query(7, ge=1, le=90)):
-    """An LLM-written analyst narrative of the briefing — strictly opt-in.
+def _no_snapshot_response(message):
+    """Response when no snapshot exists and we can't (or won't) generate one."""
+    return {
+        "available": False,
+        "text": "",
+        "error": "",
+        "message": message,
+        "can_refresh": synthesis.is_configured(),
+        "generated_at": "",
+        "age_seconds": None,
+        "age_hours": None,
+        "is_stale": True,
+    }
 
-    Returns available=False (not an error) when no ANTHROPIC_API_KEY is set,
-    so the UI can show the feature without the call ever being attempted.
+
+def _refresh_snapshot():
+    """Trigger a live regeneration of today's snapshot. Requires a key.
+
+    Reads the freshest corpus + graph and calls the same routine the
+    daily pipeline uses, so the operator-side `?refresh=1` path and the
+    nightly cron stay in lockstep.
     """
-    if not synthesis.is_configured():
-        return {
-            "available": False,
-            "message": "Set ANTHROPIC_API_KEY to enable narrative synthesis.",
-        }
     documents = _cached_corpus()
     kg = KnowledgeGraphStore(config.KG_DB)
     try:
-        data = briefing.build_briefing(documents, kg, days=days)
+        # force=True: a refresh should overwrite today's snapshot even
+        # if one already exists.
+        snapshot = pipeline.generate_daily_syntheses(
+            documents, kg, force=True
+        )
     finally:
         kg.close()
-    try:
-        return {"available": True, "narrative": synthesis.summarize_briefing(data)}
-    except synthesis.SynthesisError as exc:
-        return {"available": True, "error": str(exc)}
+    return snapshot
+
+
+@app.get("/api/hype")
+def api_hype(refresh: int = Query(0, ge=0, le=1)):
+    """Serve the daily hype-read synthesis from the sidecar snapshot.
+
+    The synthesis was generated by the daily pipeline and lives in
+    ``snapshots/syntheses/YYYY-MM-DD.json``. This endpoint returns it
+    directly — no API call, no key required for read access.
+
+    Pass ``?refresh=1`` (operator-only, needs ``ANTHROPIC_API_KEY``) to
+    force a live regeneration of today's snapshot before responding.
+    """
+    if refresh:
+        if not synthesis.is_configured():
+            return _no_snapshot_response(
+                "Refresh requires ANTHROPIC_API_KEY on the server."
+            )
+        snapshot = _refresh_snapshot()
+    else:
+        snapshot, _path = synthesis_cache.latest_snapshot()
+    if snapshot is None:
+        return _no_snapshot_response(
+            "No synthesis snapshot exists yet. The daily pipeline writes one"
+            " when ANTHROPIC_API_KEY is set on the server."
+        )
+    return _serialize_section(snapshot.get("hype", {}), snapshot)
+
+
+@app.get("/api/briefing/narrative")
+def api_briefing_narrative(refresh: int = Query(0, ge=0, le=1)):
+    """Serve the daily briefing-narrative synthesis from the sidecar snapshot.
+
+    Same cache-first contract as ``/api/hype``: zero API calls per
+    request, no key required to read. ``?refresh=1`` regenerates today's
+    snapshot (operator only).
+    """
+    if refresh:
+        if not synthesis.is_configured():
+            return _no_snapshot_response(
+                "Refresh requires ANTHROPIC_API_KEY on the server."
+            )
+        snapshot = _refresh_snapshot()
+    else:
+        snapshot, _path = synthesis_cache.latest_snapshot()
+    if snapshot is None:
+        return _no_snapshot_response(
+            "No synthesis snapshot exists yet. The daily pipeline writes one"
+            " when ANTHROPIC_API_KEY is set on the server."
+        )
+    return _serialize_section(
+        snapshot.get("briefing_narrative", {}), snapshot,
+    )
 
 
 class Correction(BaseModel):

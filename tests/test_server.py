@@ -5,7 +5,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from ailandscape import config, server
+from ailandscape import config, server, synthesis_cache
 from ailandscape.storage_kg import KnowledgeGraphStore
 from ailandscape.storage_ner import NEROutputLog
 
@@ -20,11 +20,15 @@ class ServerApiTest(unittest.TestCase):
             config.CORRECTIONS_FILE,
             config.RUN_HISTORY_FILE,
         )
+        self._orig_snapshot_dir = synthesis_cache.SNAPSHOT_SUBDIR
         config.KG_DB = pathlib.Path(self.tmp) / "kg.db"
         config.NER_OUTPUT_DB = pathlib.Path(self.tmp) / "ner.db"
         config.CORPUS_FILE = pathlib.Path(self.tmp) / "documents.jsonl"
         config.CORRECTIONS_FILE = pathlib.Path(self.tmp) / "corrections.json"
         config.RUN_HISTORY_FILE = pathlib.Path(self.tmp) / "run_history.jsonl"
+        # Each test gets its own snapshot dir so the synthesis cache
+        # doesn't bleed across tests (or read the repo's real snapshots).
+        synthesis_cache.SNAPSHOT_SUBDIR = pathlib.Path(self.tmp) / "syntheses"
 
         kg = KnowledgeGraphStore(config.KG_DB)
         china = kg.insert_node("China", "place", mention_count=5, document_count=3)
@@ -80,6 +84,7 @@ class ServerApiTest(unittest.TestCase):
             config.CORRECTIONS_FILE,
             config.RUN_HISTORY_FILE,
         ) = self._orig
+        synthesis_cache.SNAPSHOT_SUBDIR = self._orig_snapshot_dir
 
     def test_graph_endpoint(self):
         resp = self.client.get("/api/graph?min_weight=1")
@@ -228,13 +233,73 @@ class ServerApiTest(unittest.TestCase):
             self.client.get("/api/node/999999/adjacent").status_code, 404
         )
 
-    def test_hype_endpoint_no_key_returns_unavailable(self):
+    def test_hype_endpoint_serves_snapshot_without_a_key(self):
+        # Visitors without an ANTHROPIC_API_KEY must still get the latest
+        # cached synthesis. Write a snapshot, drop the key, and assert
+        # the text round-trips through the endpoint.
+        import os
+        orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            snap = synthesis_cache.make_snapshot(corpus_documents=2)
+            synthesis_cache.set_section(
+                snap, "hype", text="Cached hype!",
+                window_days=1, documents_used=4,
+            )
+            synthesis_cache.save_snapshot(snap)
+            body = self.client.get("/api/hype").json()
+            self.assertTrue(body["available"])
+            self.assertEqual(body["text"], "Cached hype!")
+            self.assertEqual(body["documents_used"], 4)
+            # can_refresh tells the UI whether to show the Refresh button.
+            self.assertFalse(body["can_refresh"])
+        finally:
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_hype_endpoint_no_snapshot_returns_message(self):
+        # No snapshot file at all (the snapshot dir is empty per setUp).
+        # The endpoint returns a friendly "no snapshot yet" message rather
+        # than 404, so the UI can render it the same way as a normal read.
         import os
         orig = os.environ.pop("ANTHROPIC_API_KEY", None)
         try:
             body = self.client.get("/api/hype").json()
             self.assertFalse(body["available"])
-            self.assertIn("ANTHROPIC_API_KEY", body["message"])
+            self.assertIn("synthesis snapshot", body["message"])
+            self.assertFalse(body["can_refresh"])
+        finally:
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_hype_refresh_without_key_is_rejected(self):
+        # ?refresh=1 is the operator-only path; without a key the server
+        # refuses rather than silently falling back to the cached read.
+        import os
+        orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            body = self.client.get("/api/hype?refresh=1").json()
+            self.assertFalse(body["available"])
+            self.assertIn("Refresh requires", body["message"])
+        finally:
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_briefing_narrative_serves_cached_snapshot(self):
+        # Same cache-first contract for the briefing narrative.
+        import os
+        orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            snap = synthesis_cache.make_snapshot()
+            synthesis_cache.set_section(
+                snap, "briefing_narrative",
+                text="An analyst-written narrative.",
+                window_days=7, documents_used=18,
+            )
+            synthesis_cache.save_snapshot(snap)
+            body = self.client.get("/api/briefing/narrative").json()
+            self.assertTrue(body["available"])
+            self.assertEqual(body["text"], "An analyst-written narrative.")
+            self.assertEqual(body["window_days"], 7)
         finally:
             if orig is not None:
                 os.environ["ANTHROPIC_API_KEY"] = orig

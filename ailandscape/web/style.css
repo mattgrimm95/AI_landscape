@@ -364,6 +364,26 @@ ul.guide-list b { color: var(--text); }
   padding: 10px 12px;
 }
 .narrative-note { color: var(--muted); font-size: 12px; }
+/* Stale snapshot banner — softly warns the operator without alarming a
+   visitor (the cached read is still readable). */
+.synthesis-stale {
+  background: rgba(224, 138, 60, 0.12);
+  border-left: 3px solid #e08a3c;
+  padding: 6px 10px;
+  margin: 8px 0;
+  color: #f0bb86;
+  font-size: 12px;
+}
+.synthesis-meta {
+  margin-top: 4px;
+  font-style: italic;
+}
+.synthesis-refresh {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-top: 4px;
+}
 .rel-line { font-size: 12px; padding: 3px 6px; border-radius: 5px; cursor: pointer; }
 .rel-line:hover { background: var(--panel-2); }
 .rel-line .rel { color: #a8c8ff; }

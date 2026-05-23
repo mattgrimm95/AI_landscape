@@ -18,6 +18,8 @@ Usage:
     python -m ailandscape.cli discover-feeds         probe new AI/nat-sec RSS feeds
     python -m ailandscape.cli discover-feeds --health-check    audit existing feeds
     python -m ailandscape.cli enrich plan.json       fetch articles + synthesis, rebuild
+    python -m ailandscape.cli synthesize-daily        write today's hype+narrative sidecar snapshot
+    python -m ailandscape.cli synthesize-daily --force  regenerate today's snapshot even if it exists
     python -m ailandscape.cli correct merge "DoD" "Department of Defense"
     python -m ailandscape.cli correct-from-review --merges --ignores --acronyms   bulk-apply review.json
     python -m ailandscape.cli overview --diff   show KPI deltas between the last two runs
@@ -37,7 +39,8 @@ import tempfile
 
 from . import (
     briefing, config, corpus, emailer, enrich, feed_discovery, pipeline,
-    reconcile, report, review, scraper, synthesis, trends, visualize,
+    reconcile, report, review, scraper, synthesis, synthesis_cache, trends,
+    visualize,
 )
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
@@ -526,6 +529,52 @@ def _ask_yes(force_yes, prompt):
     return answer in ("y", "yes")
 
 
+def cmd_synthesize_daily(args):
+    """Generate today's hype + briefing-narrative sidecar snapshot.
+
+    Reads the freshest corpus + graph and calls the Anthropic API for the
+    two syntheses, then writes `snapshots/syntheses/YYYY-MM-DD.json`.
+    Silent no-op without ANTHROPIC_API_KEY (matches every other LLM path
+    in the project).
+
+    Skips silently if today's snapshot already exists, unless --force is
+    passed — so a cron that runs once a day is cheap to retry, while an
+    operator who wants to regenerate after a big news drop can force it.
+
+    The written file is under version control (`snapshots/` is NOT
+    gitignored), so committing it with the daily corpus update means
+    visitors who pull the repo see today's synthesis without needing
+    their own API key.
+    """
+    config.ensure_dirs()
+    documents = corpus.load(config.CORPUS_FILE)
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        snapshot = pipeline.generate_daily_syntheses(
+            documents, kg, log=_log, force=args.force,
+        )
+    finally:
+        kg.close()
+    summary = {
+        "date": snapshot.get("date", ""),
+        "generated_at": snapshot.get("generated_at", ""),
+        "key_configured": synthesis.is_configured(),
+        "sections": {
+            name: {
+                "available": snapshot.get(name, {}).get("available", False),
+                "error": snapshot.get(name, {}).get("error", ""),
+                "documents_used": snapshot.get(name, {}).get(
+                    "documents_used", 0
+                ),
+            }
+            for name in synthesis_cache.SECTION_NAMES
+        },
+        "snapshot_path": str(synthesis_cache.snapshot_path()),
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def cmd_enrich(args):
     """Run an entity-enrichment plan: fetch the listed articles + optional
     synthesis, append them to the corpus, then rebuild so the new entities
@@ -888,6 +937,16 @@ def build_parser():
     serve_p = sub.add_parser("serve", help="run the interactive web app")
     serve_p.add_argument("--port", type=int, default=8000)
     serve_p.set_defaults(func=cmd_serve)
+
+    synth_p = sub.add_parser(
+        "synthesize-daily",
+        help="generate today's hype + briefing-narrative sidecar snapshot",
+    )
+    synth_p.add_argument(
+        "--force", action="store_true",
+        help="regenerate even if today's snapshot already exists",
+    )
+    synth_p.set_defaults(func=cmd_synthesize_daily)
 
     enrich_p = sub.add_parser(
         "enrich",

@@ -28,19 +28,26 @@ if (-not $python -or -not $git) {
     exit 1
 }
 
-# 1. Scrape feeds into the corpus and rebuild the derived databases.
+# 1. Scrape feeds into the corpus and rebuild the derived databases. The
+#    rebuild step also writes today's synthesis sidecar (hype + briefing
+#    narrative) to snapshots/syntheses/ if ANTHROPIC_API_KEY is set on
+#    this machine — a silent no-op otherwise.
 Write-Log ((& $python -m ailandscape.cli run 2>&1 | Out-String).TrimEnd())
 
-# 2. Commit and push the corpus, but only if new articles were appended.
-& $git add corpus/documents.jsonl
-$changed = & $git status --porcelain corpus/documents.jsonl
+# 2. Commit and push: the corpus AND any new synthesis snapshot.
+#    Staging snapshots/syntheses/ alongside the corpus means a daily
+#    commit carries today's read for visitors to pull, but only if
+#    something actually changed (git status --porcelain rejects empty
+#    diffs so a key-less run that adds nothing produces no commit).
+& $git add corpus/documents.jsonl snapshots/syntheses
+$changed = & $git status --porcelain corpus/documents.jsonl snapshots/syntheses
 if ($changed) {
-    $msg = "Daily scrape: corpus update $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
+    $msg = "Daily scrape: corpus + synthesis update $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
     Write-Log ((& $git -c user.email='' commit -m $msg 2>&1 | Out-String).TrimEnd())
     Write-Log ((& $git push origin main 2>&1 | Out-String).TrimEnd())
-    Write-Log 'committed and pushed corpus update'
+    Write-Log 'committed and pushed corpus + synthesis update'
 } else {
-    Write-Log 'no new articles; nothing to commit'
+    Write-Log 'no new articles or snapshots; nothing to commit'
 }
 
 Write-Log "=== $(Get-Date -Format 'HH:mm:ss')  done ===`r`n"

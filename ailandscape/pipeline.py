@@ -8,9 +8,14 @@ the same corpus always yields the same outputs.
 
 import datetime
 import json
+import os
 import time
 
-from . import config, corpus, jbooks, ner, reconcile, sbir, scraper
+from . import (
+    briefing, config, corpus, jbooks, ner, reconcile, sbir, scraper,
+    synthesis, synthesis_cache,
+)
+from .storage_kg import KnowledgeGraphStore
 
 # Polite pause between article-page fetches during scraping.
 ARTICLE_FETCH_DELAY = 1.0
@@ -290,6 +295,167 @@ def rebuild(
     }
 
 
+def _recent_documents_for_hype(documents, days=1, fallback_days=3):
+    """Return the documents Claude's hype synthesis should summarize.
+
+    Mirrors the original /api/hype windowing: documents within the last
+    `days` (default 1), with a soft fallback to `fallback_days` so a
+    quiet 24-hour window still produces something. Sorted most-recent
+    first because the hype prompt leans on the head of the list.
+    """
+    today = datetime.date.today()
+    cutoff_main = today - datetime.timedelta(days=days)
+    cutoff_fallback = today - datetime.timedelta(days=fallback_days)
+
+    def _doc_date(doc):
+        date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
+        if not date_str:
+            return None
+        try:
+            return datetime.date.fromisoformat(date_str[:10])
+        except ValueError:
+            return None
+
+    recent = [d for d in documents
+              if (dd := _doc_date(d)) is not None and dd >= cutoff_main]
+    if not recent:
+        recent = [d for d in documents
+                  if (dd := _doc_date(d)) is not None and dd >= cutoff_fallback]
+    recent.sort(
+        key=lambda d: corpus.published_date(d)
+        or (d.get("fetched_at") or "")[:10],
+        reverse=True,
+    )
+    return recent
+
+
+def _sbir_funding(documents):
+    """Total SBIR funding visible in the corpus, for the hype prompt's footer."""
+    total = sum(
+        ((d.get("metadata") or {}).get("award_amount") or 0)
+        for d in documents
+        if (d.get("metadata") or {}).get("data_source") == "SBIR"
+    )
+    count = sum(
+        1 for d in documents
+        if (d.get("metadata") or {}).get("data_source") == "SBIR"
+    )
+    return {"awards": count, "total_amount": int(total)}
+
+
+def generate_daily_syntheses(documents, kg_store, log=None, force=False):
+    """Generate today's hype + briefing-narrative snapshot, if a key is set.
+
+    Strictly opt-in: silent no-op when no ANTHROPIC_API_KEY is configured,
+    matching the same discipline every other LLM-touching path in the
+    project. Each sub-call (hype, briefing narrative) is independent — a
+    rate-limit on one writes that section as `available=False` with an
+    error string but leaves the other section intact.
+
+    When `force=False` and today's snapshot already exists, returns the
+    existing one unchanged so a re-run of the daily job is cheap. With
+    `force=True` the snapshot is regenerated even if today's exists —
+    used by the operator-side `?refresh=1` path and the `synthesize-daily
+    --force` CLI flag.
+
+    Always returns the snapshot dict so callers can inspect what was
+    written, even on the no-key path (where the snapshot will not have
+    been persisted to disk).
+    """
+    log = log or (lambda *_a: None)
+
+    # Cheap exit path: if a snapshot for today already exists and we
+    # aren't forcing, reuse it. A daily cron re-running on a manual
+    # trigger is a common case and shouldn't re-bill the API.
+    today_path = synthesis_cache.snapshot_path()
+    if not force and today_path.exists():
+        existing = synthesis_cache.load_snapshot(today_path)
+        if existing is not None:
+            log("syntheses: today's snapshot already exists at %s" % today_path)
+            return existing
+
+    if not synthesis.is_configured():
+        log("syntheses: no ANTHROPIC_API_KEY in env; skipping (snapshot not written)")
+        # Still return an in-memory shape so callers don't have to special-case.
+        return synthesis_cache.make_snapshot(
+            corpus_mtime="",
+            corpus_documents=len(documents),
+        )
+
+    try:
+        corpus_mtime = datetime.datetime.fromtimestamp(
+            os.path.getmtime(config.CORPUS_FILE),
+            tz=datetime.timezone.utc,
+        ).isoformat(timespec="seconds")
+    except OSError:
+        corpus_mtime = ""
+
+    snapshot = synthesis_cache.make_snapshot(
+        corpus_mtime=corpus_mtime, corpus_documents=len(documents),
+    )
+
+    # ---- hype ----
+    hype_docs = _recent_documents_for_hype(documents, days=1, fallback_days=3)
+    sbir_funding = _sbir_funding(documents)
+    try:
+        hype_text = synthesis.summarize_hype(
+            hype_docs, sbir_funding=sbir_funding,
+        )
+        synthesis_cache.set_section(
+            snapshot, "hype",
+            text=hype_text, available=True,
+            window_days=1, documents_used=len(hype_docs),
+        )
+        log("syntheses: hype generated (%d documents)" % len(hype_docs))
+    except synthesis.SynthesisError as exc:
+        synthesis_cache.set_section(
+            snapshot, "hype",
+            available=False, error=str(exc)[:200],
+            window_days=1, documents_used=len(hype_docs),
+        )
+        log("syntheses: hype FAILED: %s" % exc)
+
+    # ---- briefing narrative ----
+    try:
+        data = briefing.build_briefing(documents, kg_store, days=7)
+        narrative = synthesis.summarize_briefing(data)
+        synthesis_cache.set_section(
+            snapshot, "briefing_narrative",
+            text=narrative, available=True,
+            window_days=7,
+            documents_used=int(data.get("recent_count", 0) or 0),
+        )
+        log("syntheses: briefing narrative generated")
+    except synthesis.SynthesisError as exc:
+        synthesis_cache.set_section(
+            snapshot, "briefing_narrative",
+            available=False, error=str(exc)[:200],
+            window_days=7,
+        )
+        log("syntheses: briefing narrative FAILED: %s" % exc)
+    except Exception as exc:
+        # build_briefing can raise on a graph in an unusual shape;
+        # mark the section failed but don't kill the snapshot.
+        synthesis_cache.set_section(
+            snapshot, "briefing_narrative",
+            available=False,
+            error=("briefing build failed: %s" % exc)[:200],
+            window_days=7,
+        )
+        log("syntheses: briefing build FAILED: %s" % exc)
+
+    # Only write the snapshot if at least one section succeeded —
+    # otherwise we'd be writing an empty file every day under a rate-
+    # limit and replacing yesterday's working snapshot with nothing.
+    if any(snapshot[s]["available"] for s in synthesis_cache.SECTION_NAMES):
+        written = synthesis_cache.save_snapshot(snapshot)
+        log("syntheses: wrote snapshot to %s" % written)
+    else:
+        log("syntheses: every section failed; snapshot not written")
+
+    return snapshot
+
+
 def _record_run(result, scrape_seconds, rebuild_seconds, quality=None):
     """Append a timing + counts record for this run to the run-history log.
 
@@ -402,6 +568,17 @@ def run(
     rebuild_seconds = time.time() - started
 
     quality = _quality_kpis_after_rebuild(kg_store, rebuilt["entities"])
+
+    # Generate today's synthesis sidecar from the freshly-rebuilt state.
+    # A no-op without ANTHROPIC_API_KEY, and a no-op when today's
+    # snapshot already exists, so re-running the daily job is cheap.
+    documents_for_synth = corpus.load(corpus_path)
+    try:
+        generate_daily_syntheses(documents_for_synth, kg_store, log=log)
+    except Exception as exc:
+        # Synthesis is opt-in and non-critical — failures here must
+        # never break the daily pipeline.
+        log("syntheses: unexpected error (ignored): %s" % exc)
 
     result = {
         "scrape": scrape,

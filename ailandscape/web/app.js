@@ -1107,9 +1107,11 @@ async function showBriefing(opts) {
       b.sbir_funding.awards + " AI-related awards · $" +
       Number(b.sbir_funding.total_amount).toLocaleString() + " total</div>";
   }
-  html +=
-    '<div id="narrative-box"><button id="gen-narrative" class="ghost">' +
-    "Generate analyst narrative</button></div>";
+  // The narrative is served from a daily-generated sidecar snapshot.
+  // Render it inline on first open so visitors without a key still see
+  // the latest synthesis; the button is now "Refresh" (operator-only,
+  // shown only when the server reports can_refresh=true).
+  html += '<div id="narrative-box"><p class="muted">Loading narrative…</p></div>';
   if (b.trending_topics.length) {
     html += "<h3>Trending AI topics</h3>" +
       barChart(b.trending_topics.map((c) => [c.name, c.mentions]));
@@ -1163,31 +1165,41 @@ async function showBriefing(opts) {
       showBriefing({ days });
     });
   }
-  $("gen-narrative").addEventListener("click", async () => {
-    const btn = $("gen-narrative");
-    btn.textContent = "Generating…";
-    btn.disabled = true;
-    let r;
-    try {
-      r = await api("/api/briefing/narrative");
-    } catch (e) {
-      $("narrative-box").innerHTML =
-        '<p class="narrative-note">Narrative unavailable: ' +
-        escapeHtml(e.message) + "</p>";
-      return;
-    }
-    if (!r.available) {
-      $("narrative-box").innerHTML =
-        '<p class="narrative-note">' + escapeHtml(r.message) + "</p>";
-    } else if (r.error) {
-      $("narrative-box").innerHTML =
-        '<p class="narrative-note">Synthesis failed: ' +
-        escapeHtml(r.error) + "</p>";
-    } else {
-      $("narrative-box").innerHTML =
-        '<div class="narrative">' + escapeHtml(r.narrative) + "</div>";
-    }
-  });
+  loadBriefingNarrative();
+}
+
+// Render the analyst-narrative cache section into #narrative-box inside
+// the open briefing modal. Called on initial open (cache-first read) and
+// again after a refresh click.
+async function loadBriefingNarrative(opts) {
+  opts = opts || {};
+  const box = $("narrative-box");
+  if (!box) return;
+  if (opts.refresh) box.innerHTML = '<p class="muted">Refreshing narrative…</p>';
+  let r;
+  const url = opts.refresh
+    ? "/api/briefing/narrative?refresh=1"
+    : "/api/briefing/narrative";
+  try {
+    r = await api(url);
+  } catch (e) {
+    box.innerHTML =
+      '<p class="narrative-note">Narrative unavailable: ' +
+      escapeHtml(e.message) + "</p>";
+    return;
+  }
+  box.innerHTML =
+    synthesisBodyHtml(r) +
+    synthesisFooterHtml(r, {
+      docsLabel: "recent documents",
+      refreshTarget: "briefing",
+    });
+  const btn = box.querySelector(".synthesis-refresh");
+  if (btn) {
+    btn.addEventListener("click", () =>
+      loadBriefingNarrative({ refresh: true })
+    );
+  }
 }
 
 async function findPath() {
@@ -1408,39 +1420,105 @@ async function showTrajectory() {
   openModal(html);
 }
 
-// ---- daily hype read (Claude-powered) --------------------------------------
+// ---- Claude-powered syntheses (cache-first) --------------------------------
+//
+// Both `Today's spotlight` (the hype read) and the briefing's analyst
+// narrative are now served from a daily-generated sidecar snapshot the
+// pipeline writes to snapshots/syntheses/YYYY-MM-DD.json. The server
+// returns the cached text + a freshness signal, so the modal can render
+// instantly for every visitor (no API key required to read). When the
+// server reports `can_refresh: true` (an ANTHROPIC_API_KEY is set on
+// the server) a Refresh button is shown that hits `?refresh=1` to
+// regenerate today's snapshot in place.
 
-async function showHype() {
-  openModal(
-    '<h2 class="modal-title">Today\'s spotlight</h2>' +
-    '<p class="mini-spark-note">A 30-second hype read of the most recent ' +
-    "news, generated on demand from the corpus.</p>" +
-    '<div id="hype-box"><p class="muted">Generating…</p></div>'
-  );
+// Human-readable "N minutes/hours/days ago" from an age in seconds.
+function ageString(seconds) {
+  if (seconds == null) return "unknown age";
+  if (seconds < 90) return "just now";
+  if (seconds < 3600) return Math.round(seconds / 60) + " min ago";
+  if (seconds < 86400) return Math.round(seconds / 3600) + " h ago";
+  return Math.round(seconds / 86400) + " d ago";
+}
+
+// Render the metadata footer + Refresh button under a synthesis section.
+// Shared by the hype modal and the briefing narrative box. `r` is the
+// cache response from /api/hype or /api/briefing/narrative.
+function synthesisFooterHtml(r, options) {
+  options = options || {};
+  const docsLabel = options.docsLabel || "documents";
+  const parts = [];
+  if (r.generated_at) {
+    parts.push("Generated " + ageString(r.age_seconds));
+  }
+  if (r.documents_used) {
+    parts.push("from " + r.documents_used + " " + docsLabel);
+  }
+  if (r.window_days) {
+    parts.push(r.window_days + "-day window");
+  }
+  const footer = parts.length
+    ? '<p class="mini-spark-note synthesis-meta">' +
+      escapeHtml(parts.join(" · ")) + "</p>"
+    : "";
+  const staleNote = r.is_stale
+    ? '<p class="narrative-note synthesis-stale">' +
+      "Cached snapshot is past its freshness window — consider refreshing." +
+      "</p>"
+    : "";
+  const refreshBtn = r.can_refresh
+    ? '<button class="ghost synthesis-refresh" data-target="' +
+      escapeHtml(options.refreshTarget || "") + '">Refresh</button>'
+    : "";
+  return staleNote + footer + (refreshBtn ? '<div class="row">' + refreshBtn + "</div>" : "");
+}
+
+// Render the body (text / error / unavailable note) for a synthesis section.
+function synthesisBodyHtml(r) {
+  if (r.text) {
+    return '<div class="narrative">' + escapeHtml(r.text) + "</div>";
+  }
+  if (r.error) {
+    return '<p class="narrative-note">Synthesis failed: ' +
+      escapeHtml(r.error) + "</p>";
+  }
+  if (r.message) {
+    return '<p class="narrative-note">' + escapeHtml(r.message) + "</p>";
+  }
+  return '<p class="narrative-note">No synthesis available yet.</p>';
+}
+
+async function showHype(opts) {
+  opts = opts || {};
+  if (!opts.skipModalOpen) {
+    openModal(
+      '<h2 class="modal-title">Today\'s spotlight</h2>' +
+      '<p class="mini-spark-note">A 30-second hype read of the most recent ' +
+      "news, served from the daily synthesis snapshot.</p>" +
+      '<div id="hype-box"><p class="muted">Loading…</p></div>'
+    );
+  } else {
+    $("hype-box").innerHTML = '<p class="muted">Refreshing…</p>';
+  }
   let r;
+  const url = opts.refresh ? "/api/hype?refresh=1" : "/api/hype";
   try {
-    r = await api("/api/hype");
+    r = await api(url);
   } catch (e) {
     $("hype-box").innerHTML =
-      '<p class="narrative-note">Could not generate: ' +
+      '<p class="narrative-note">Could not load: ' +
       escapeHtml(e.message) + "</p>";
     return;
   }
-  if (!r.available) {
-    $("hype-box").innerHTML =
-      '<p class="narrative-note">' + escapeHtml(r.message) + "</p>";
-    return;
-  }
-  if (r.error) {
-    $("hype-box").innerHTML =
-      '<p class="narrative-note">Synthesis failed: ' +
-      escapeHtml(r.error) + "</p>";
-    return;
-  }
   $("hype-box").innerHTML =
-    '<div class="narrative">' + escapeHtml(r.hype) + "</div>" +
-    '<p class="mini-spark-note">Based on ' + r.documents_used +
-    " recent documents.</p>";
+    synthesisBodyHtml(r) +
+    synthesisFooterHtml(r, {
+      docsLabel: "recent documents",
+      refreshTarget: "hype",
+    });
+  const btn = $("hype-box").querySelector(".synthesis-refresh");
+  if (btn) {
+    btn.addEventListener("click", () => showHype({ refresh: true, skipModalOpen: true }));
+  }
 }
 
 // ---- surprise me (serendipity) ---------------------------------------------
