@@ -20,6 +20,15 @@ import json
 import pathlib
 import re
 
+from . import gazetteer
+
+# Canonical names that the curated gazetteer trusts. Used by the noise
+# detector to skip "looks like a version tag" suggestions for real model /
+# product / org names (Gemma 4, Genie 3, Lyria 3, Zone 5).
+_GAZETTEER_CANONICALS = frozenset(
+    canonical for canonical, _ in gazetteer.GAZETTEER.values()
+)
+
 # Words that, when they precede or qualify a bare name in a multi-word
 # entity, mark that entity as a *different* thing — not a longer form of the
 # bare name. "Gulf of Oman" is not Oman the country; "South Lebanon" is not
@@ -59,11 +68,23 @@ def _is_compound_with_bare(bare_name, full_name):
 _URL_OR_HANDLE = re.compile(r"@|//|https?:", re.IGNORECASE)
 # A capitalized common-English-word followed by a 1-4 digit suffix —
 # "Block 2", "Group 1", "Assumption 2", "Lot 2", "Frozen 2". Some real
-# products match too ("Gemma 2", "Aster 30"); surfaced as a *suggestion*,
-# not auto-dropped, so a human picks. Requires the leading word to be
-# capital + at least three lowercase letters so short military designations
-# like "Mk 1" / "F 35" do not match.
+# products match too ("Gemma 2", "Aster 30", "Gemini 3"); the pattern alone
+# can't distinguish them, so we layer two evidence-based escape hatches:
+#   1. The curated gazetteer (curator-of-record signal)
+#   2. Document frequency >= _MIN_DOC_FREQ_FOR_REAL (corpus signal — if the
+#      world is writing about it across multiple independent documents,
+#      it's a real thing, not a stray version tag in one paper).
+# Requires the leading word to be capital + at least three lowercase
+# letters so short military designations like "Mk 1" / "F 35" do not match.
 _LIKELY_VERSION_TAG = re.compile(r"^[A-Z][a-z]{2,}\s+\d{1,4}$")
+
+# Threshold for treating a version-tag-shaped name as corpus-validated. Set
+# to 2 because every observed noise item (Block 2, Group 1, Assumption 1,
+# Frozen 2, ...) was confined to one document, while every observed real
+# product (Gemini 3, Aster 30, Genie 3, Lyria 3, Zone 5) appeared in two or
+# more. Two independent sources crossing the same version-tag-shaped string
+# is unlikely to be coincidence.
+_MIN_DOC_FREQ_FOR_REAL = 2
 
 
 def _noise_reason(node):
@@ -72,6 +93,14 @@ def _noise_reason(node):
     Structural-only heuristics; the broader "is this a real proper noun?"
     judgement is left to the reconcile prune (which uses gazetteer trust
     and document frequency) and to human review via `correct ignore`.
+
+    The version-tag check is gated by two evidence sources before flagging:
+    the curated gazetteer overrides it (curator-of-record), and a document
+    frequency floor overrides it (corpus consensus). Either alone is enough
+    to keep a name. This is intentional — the pattern catches one-off
+    boilerplate ("Block 2", "Assumption 1") without burying the curator
+    under false positives for actual products that happen to share its
+    shape ("Gemini 3", "Aster 30").
     """
     name = (node.get("canonical_name") or "").strip()
     if len(name) < 3:
@@ -80,7 +109,12 @@ def _noise_reason(node):
         return "contains URL or handle characters"
     if not any(ch.isalpha() for ch in name):
         return "no letters"
+    if name in _GAZETTEER_CANONICALS:
+        return None
     if _LIKELY_VERSION_TAG.fullmatch(name):
+        doc_freq = int(node.get("document_count", 0) or 0)
+        if doc_freq >= _MIN_DOC_FREQ_FOR_REAL:
+            return None
         return "looks like a generic version tag"
     return None
 

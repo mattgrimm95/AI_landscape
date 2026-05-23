@@ -65,6 +65,41 @@ class ReviewTest(unittest.TestCase):
         self.assertNotIn("1st Cavalry Division", names)
         self.assertNotIn("Mk 1", names)
 
+    def test_noise_filter_respects_gazetteer(self):
+        # Gazetteer-trusted canonicals that happen to match the version-tag
+        # shape ("Gemma 4", "Genie 3", "Lyria 3", "Zone 5") must not be
+        # flagged as noise — the gazetteer is the curator-of-record, and
+        # this holds even when their corpus presence is thin (doc_freq=1).
+        for name in ("Gemma 4", "Genie 3", "Lyria 3", "Zone 5"):
+            self.kg.insert_node(name, "product", document_count=1)
+        self.kg.insert_node("Block 2", "product", document_count=1)
+        self.kg.commit()
+        data = review.build_review([], self.kg)
+        names = {s["name"] for s in data["noise_suggestions"]}
+        self.assertNotIn("Gemma 4", names)
+        self.assertNotIn("Genie 3", names)
+        self.assertNotIn("Lyria 3", names)
+        self.assertNotIn("Zone 5", names)
+        self.assertIn("Block 2", names)
+
+    def test_noise_filter_respects_doc_frequency(self):
+        # A version-tag-shaped name that the gazetteer has not yet curated
+        # can still escape the noise flag on the strength of corpus evidence
+        # alone: two or more independent documents using the same string is
+        # the principled signal that it's a real product, not boilerplate.
+        # "Aster 30" (real MBDA missile) and an unknown "Foobar 7" both
+        # cross the doc-frequency floor and must survive; the same shape
+        # confined to one document ("Block 2") is still flagged.
+        self.kg.insert_node("Aster 30", "product", document_count=2)
+        self.kg.insert_node("Foobar 7", "product", document_count=3)
+        self.kg.insert_node("Block 2", "product", document_count=1)
+        self.kg.commit()
+        data = review.build_review([], self.kg)
+        names = {s["name"] for s in data["noise_suggestions"]}
+        self.assertNotIn("Aster 30", names)
+        self.assertNotIn("Foobar 7", names)
+        self.assertIn("Block 2", names)
+
     def test_review_does_not_merge_compound_with_bare(self):
         # The bare name appears AFTER an "of" or behind a qualifier
         # ("Gulf", "South", "Broad ... of") in the compound — those are

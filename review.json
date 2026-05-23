@@ -285,6 +285,30 @@
       "singletons": 3145,
       "new_merges": 0,
       "new_ignores": 0
+    },
+    {
+      "nodes": 4889,
+      "singletons": 3114,
+      "new_merges": 0,
+      "new_ignores": 0
+    },
+    {
+      "nodes": 4909,
+      "singletons": 3091,
+      "new_merges": 0,
+      "new_ignores": 1
+    },
+    {
+      "nodes": 4909,
+      "singletons": 3091,
+      "new_merges": 0,
+      "new_ignores": 0
+    },
+    {
+      "nodes": 4909,
+      "singletons": 3091,
+      "new_merges": 0,
+      "new_ignores": 0
     }
   ],
   "suggested_ignores": [
@@ -436,6 +460,11 @@
     {
       "name": "Zone 5",
       "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Genie 3",
+      "type": "product",
       "reason": "looks like a generic version tag"
     }
   ]

@@ -176,10 +176,21 @@ def cmd_demo(args):
 def cmd_stats(_args):
     ner_log, kg = _open_stores()
     try:
+        reading = corpus.reading_stats(config.CORPUS_FILE)
         print(
             "Corpus:   %d documents  (%s)"
-            % (corpus.count(config.CORPUS_FILE), config.CORPUS_FILE)
+            % (reading["documents"], config.CORPUS_FILE)
         )
+        if reading["documents"]:
+            print(
+                "  Claude reads: %d ever-read, %d fresh, %d stale, %d never-read"
+                % (
+                    reading["ever_read"],
+                    reading["fresh"],
+                    reading["stale"],
+                    reading["never_read"],
+                )
+            )
         print("NER log:  %d entities" % ner_log.count_entities())
         print(
             "Graph:    %d nodes, %d edges"
@@ -419,6 +430,64 @@ def cmd_snapshot(_args):
     return 0
 
 
+def cmd_reading(args):
+    """Show Claude-reading coverage of the corpus.
+
+    With --reset, flip every document's `claude_read_fresh` flag to False
+    (use after a major corpus update when a fresh re-read is warranted).
+    With --list-stale, print the URLs Claude should re-read next.
+    """
+    if args.reset:
+        n = corpus.invalidate_freshness(config.CORPUS_FILE)
+        print("reset claude_read_fresh on %d documents" % n)
+        return 0
+
+    stats = corpus.reading_stats(config.CORPUS_FILE)
+    print("Documents:       %d" % stats["documents"])
+    if not stats["documents"]:
+        return 0
+    pct = lambda n: 100.0 * n / stats["documents"]
+    print(
+        "Ever read:       %d  (%.0f%%)" % (stats["ever_read"], pct(stats["ever_read"]))
+    )
+    print(
+        "Fresh (current): %d  (%.0f%%)" % (stats["fresh"], pct(stats["fresh"]))
+    )
+    print(
+        "Stale (read but invalidated): %d  (%.0f%%)"
+        % (stats["stale"], pct(stats["stale"]))
+    )
+    print(
+        "Never read:      %d  (%.0f%%)"
+        % (stats["never_read"], pct(stats["never_read"]))
+    )
+    print(
+        "Total Claude reads logged: %d   (max on one doc: %d)"
+        % (stats["total_reads"], stats["max_reads_one_doc"])
+    )
+
+    if args.list_stale:
+        documents = corpus.load(config.CORPUS_FILE)
+        stale = [
+            d for d in documents
+            if not d.get("claude_read_fresh")
+            and int(d.get("claude_read_count", 0) or 0) >= 0
+        ]
+        # Sort: never-read first (so they show on top), then oldest read.
+        stale.sort(key=lambda d: (
+            int(d.get("claude_read_count", 0) or 0),
+            d.get("claude_last_read", "") or "",
+        ))
+        print("\nDocuments due for re-read (first %d):" % min(20, len(stale)))
+        for d in stale[:20]:
+            reads = int(d.get("claude_read_count", 0) or 0)
+            print(
+                "  [%dx] %s  %s"
+                % (reads, d.get("published", "")[:16], d.get("title", "")[:70])
+            )
+    return 0
+
+
 def cmd_reset(args):
     # Destructive, but only for the *derived* databases — the corpus (the
     # source of truth) is never touched, and even this needs --confirm.
@@ -567,6 +636,20 @@ def build_parser():
     sub.add_parser(
         "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)
+
+    reading_p = sub.add_parser(
+        "reading",
+        help="show Claude reading coverage; --reset invalidates freshness",
+    )
+    reading_p.add_argument(
+        "--reset", action="store_true",
+        help="flip every claude_read_fresh flag to False (use after major corpus updates)",
+    )
+    reading_p.add_argument(
+        "--list-stale", action="store_true",
+        help="also print the top documents Claude should re-read next",
+    )
+    reading_p.set_defaults(func=cmd_reading)
 
     reset_p = sub.add_parser(
         "reset", help="delete the derived databases (the corpus is kept)"

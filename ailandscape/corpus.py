@@ -25,11 +25,26 @@ DOCUMENT_FIELDS = (
     "content_hash",
     "raw_text",
     "metadata",
+    # Claude reading tracker. `claude_read_count` is how many times Claude
+    # has read this article end-to-end during a corpus survey. `claude_read_fresh`
+    # is True iff Claude has read it since the article was added (resetting it
+    # — via `corpus invalidate_freshness` / `python -m ailandscape.cli reading
+    # --reset` — signals a major corpus update that warrants re-reading).
+    # `claude_last_read` is an ISO timestamp of the most recent read, or "".
+    "claude_read_count",
+    "claude_read_fresh",
+    "claude_last_read",
 )
 
 # `metadata` is a JSON object (source-specific structured data, e.g. an SBIR
-# award amount); every other field is a string.
-_FIELD_DEFAULTS = {"metadata": {}}
+# award amount); every other field is a string. The Claude reading fields are
+# typed: an int counter, a bool freshness flag, an ISO-8601 timestamp string.
+_FIELD_DEFAULTS = {
+    "metadata": {},
+    "claude_read_count": 0,
+    "claude_read_fresh": False,
+    "claude_last_read": "",
+}
 
 
 def _project(document):
@@ -51,9 +66,18 @@ def load(path):
             line = line.strip()
             if line:
                 record = json.loads(line)
-                # Corpus lines written before `metadata` existed still load
-                # with the default, so consumers can rely on the key.
-                record.setdefault("metadata", {})
+                # Corpus lines written before a field was introduced
+                # (`metadata`, the `claude_read_*` tracker) still load with
+                # the typed default, so consumers can rely on every key in
+                # `_FIELD_DEFAULTS` being present.
+                for field, default in _FIELD_DEFAULTS.items():
+                    if field not in record:
+                        # Copy mutable defaults (the `metadata` dict) so each
+                        # record gets its own; the int/bool/str defaults are
+                        # immutable and can be shared.
+                        record[field] = (
+                            default.copy() if isinstance(default, dict) else default
+                        )
                 documents.append(record)
     return documents
 
@@ -95,6 +119,69 @@ def save(path, documents):
 
 def count(path):
     return len(load(path))
+
+
+def mark_read(path, content_hashes, when_iso):
+    """Mark the documents identified by `content_hashes` as Claude-read.
+
+    Increments `claude_read_count`, sets `claude_read_fresh=True`, and stamps
+    `claude_last_read` to `when_iso` for each matched document. Returns the
+    number of documents updated. Other documents are written back unchanged
+    so the corpus stays byte-stable for unaffected lines.
+    """
+    targets = set(content_hashes)
+    if not targets:
+        return 0
+    documents = load(path)
+    updated = 0
+    for doc in documents:
+        if doc.get("content_hash") in targets:
+            doc["claude_read_count"] = int(doc.get("claude_read_count", 0) or 0) + 1
+            doc["claude_read_fresh"] = True
+            doc["claude_last_read"] = when_iso
+            updated += 1
+    if updated:
+        save(path, documents)
+    return updated
+
+
+def invalidate_freshness(path):
+    """Flip `claude_read_fresh` to False on every document.
+
+    Use after a major corpus update (new feed sources, schema migration, large
+    gazetteer overhaul) when Claude's prior reads no longer reflect the
+    current corpus context and a fresh survey is warranted. The read counter
+    and last-read timestamp are preserved.
+    """
+    documents = load(path)
+    changed = 0
+    for doc in documents:
+        if doc.get("claude_read_fresh"):
+            doc["claude_read_fresh"] = False
+            changed += 1
+    if changed:
+        save(path, documents)
+    return changed
+
+
+def reading_stats(path):
+    """Return a small dict summarizing Claude read coverage of the corpus."""
+    documents = load(path)
+    total = len(documents)
+    ever_read = sum(
+        1 for d in documents if int(d.get("claude_read_count", 0) or 0) > 0
+    )
+    fresh = sum(1 for d in documents if d.get("claude_read_fresh"))
+    counts = [int(d.get("claude_read_count", 0) or 0) for d in documents]
+    return {
+        "documents": total,
+        "ever_read": ever_read,
+        "fresh": fresh,
+        "never_read": total - ever_read,
+        "stale": ever_read - fresh,
+        "total_reads": sum(counts),
+        "max_reads_one_doc": max(counts) if counts else 0,
+    }
 
 
 def document_text(doc):

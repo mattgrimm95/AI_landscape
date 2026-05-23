@@ -45,6 +45,7 @@
 * Object oriented program bias for easier scalability and readability.
 * Test Driven Development.
 * Update rules and code to patch corrected errors in a way that preserves the simplicity and integrity of the system overall without becoming a mess of singular, isolated rules.
+* Take as much time as needed on tasks to make sure they are done correctly, accurately, comprehensively, and proficiently.
 
 ## Project Characteristics
 
@@ -59,6 +60,7 @@ initiated through a prompt from a human
 
 ## Good Prompt Examples
 * Analyze, review, and plan the code and give actionable, feasible, and valuable development recommendations to ensure that someone can navigate the knowledge graph or derivative components and efficiently and quickly learn about the AI landscape within a national security context. Output a list with details that I can give the go-ahead on for a sub-set of them, or all of them. Iterate multiple times if required to produce a comprehensive, clear, and productive response.
-* With Claude, go over the corpus and find new entities and relationships within single article texts but also across articles.
-## Idea for Quick App Building
+* With Claude, go over the corpus and find new entities and relationships within single article texts but also across articles. Break up the work in case you get stopped midway through. Actually go through each article even if it is costly. Prioritize reading through articles with low reading count and articles that have not been read by Claude after the last major corpus article update. Tell me how long it took after. Also report on unique findings. After updates, propagate to other databases and the visualization.
 * 
+## Idea for Quick App Building
+* Brainstorm -> one-shot -> Plan/analyze/feedback -> routine maintenance and progression.
