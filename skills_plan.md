@@ -43,6 +43,8 @@
 * Aim for full stack development including a front-end and back-end when building applications.
 * Highly value average User Experience.
 * Object oriented program bias for easier scalability and readability.
+* Test Driven Development.
+* Update rules and code to patch corrected errors in a way that preserves the simplicity and integrity of the system overall without becoming a mess of singular, isolated rules.
 
 ## Project Characteristics
 
@@ -56,4 +58,7 @@ initiated through a prompt from a human
 * Focused on Artificial Intelligence (AI) information and knowledge.
 
 ## Good Prompt Examples
-Analyze, review, and plan the code and give actionable, feasible, and valuable development recommendations to ensure that someone can navigate the knowledge graph or derivative components and efficiently and quickly learn about the AI landscape within a national security context. Output a list with details that I can give the go-ahead on for a sub-set of them, or all of them. Iterate multiple times if required to produce a comprehensive, clear, and productive response.
+* Analyze, review, and plan the code and give actionable, feasible, and valuable development recommendations to ensure that someone can navigate the knowledge graph or derivative components and efficiently and quickly learn about the AI landscape within a national security context. Output a list with details that I can give the go-ahead on for a sub-set of them, or all of them. Iterate multiple times if required to produce a comprehensive, clear, and productive response.
+* With Claude, go over the corpus and find new entities and relationships within single article texts but also across articles.
+## Idea for Quick App Building
+* 

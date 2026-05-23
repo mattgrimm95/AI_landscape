@@ -264,6 +264,9 @@ class ReconcileTest(unittest.TestCase):
             ],
         )
         self._add_doc("h2", [{"text": "Hegseth", "label": "person"}])
+        # A third document with the bare surname keeps it above the
+        # weak-single-word prune so coreference is what is under test here.
+        self._add_doc("h3", [{"text": "Hegseth", "label": "person"}])
         summary = reconcile.reconcile(self.documents, self.ner, self.kg)
         # Two people share the surname, so bare "Hegseth" stays its own node.
         self.assertEqual(summary["nodes"], 3)
@@ -289,9 +292,51 @@ class ReconcileTest(unittest.TestCase):
             ],
         )
         self._add_doc("h2", [{"text": "General", "label": "organization"}])
+        # Bare "General" is mentioned in two docs so it survives the
+        # weak-single-word prune; coreference is what is under test here.
+        self._add_doc("h3", [{"text": "General", "label": "organization"}])
         summary = reconcile.reconcile(self.documents, self.ner, self.kg)
         # Two orgs share the first word, so bare "General" stays its own node.
         self.assertEqual(summary["nodes"], 3)
+
+    def test_single_word_non_gazetteer_single_doc_is_pruned(self):
+        # A capitalized common noun typed by NER as a real entity, but only
+        # ever mentioned in one document — the prune drops it.
+        self._add_doc("h1", [{"text": "Designs", "label": "group"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        self.assertEqual(summary["nodes"], 0)
+
+    def test_lowercase_single_word_entity_is_pruned(self):
+        # Two documents reference "kin" as an org; even with doc_freq=2 a
+        # lowercase canonical fails the proper-noun shape check.
+        self._add_doc("h1", [{"text": "kin", "label": "organization"}])
+        self._add_doc("h2", [{"text": "kin", "label": "organization"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        self.assertEqual(summary["nodes"], 0)
+
+    def test_attribute_extraction_strips_email_boilerplate(self):
+        # An academic-page glitch concatenated a name with contact / email
+        # boilerplate; the clean name + an email attribute should result.
+        self._add_doc("h1", [{
+            "text": ("Chelsea Finn Contact : tianheyu@cs.stanford.edu "
+                     "Links: Paper"),
+            "label": "person",
+        }])
+        self._add_doc("h2", [{"text": "Chelsea Finn", "label": "person"}])
+        reconcile.reconcile(self.documents, self.ner, self.kg)
+        node = self.kg.node_by_alias("chelsea finn")
+        self.assertIsNotNone(node)
+        self.assertEqual(node["canonical_name"], "Chelsea Finn")
+        attrs = json.loads(node["metadata"]).get("attributes", {})
+        self.assertEqual(attrs.get("email"), "tianheyu@cs.stanford.edu")
+
+    def test_gazetteer_entity_kept_even_in_one_document(self):
+        # Pentagon is a gazetteer canonical, so a single-doc mention survives
+        # the new prune.
+        self._add_doc("h1", [{"text": "Pentagon", "label": "organization"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        self.assertEqual(summary["nodes"], 1)
+        self.assertIsNotNone(self.kg.node_by_alias("pentagon"))
 
 
 if __name__ == "__main__":

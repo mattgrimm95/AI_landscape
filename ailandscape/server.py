@@ -26,6 +26,13 @@ app = FastAPI(title="AI Landscape Knowledge Graph", docs_url="/api/docs")
 
 
 def _node_json(node):
+    attributes = {}
+    raw = node.get("metadata")
+    if raw:
+        try:
+            attributes = json.loads(raw).get("attributes", {}) or {}
+        except (ValueError, TypeError):
+            attributes = {}
     return {
         "id": node["id"],
         "label": node["canonical_name"],
@@ -34,6 +41,7 @@ def _node_json(node):
         "documents": node["document_count"],
         "first_seen": node["first_seen"],
         "last_seen": node["last_seen"],
+        "attributes": attributes,
     }
 
 

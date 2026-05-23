@@ -1,11 +1,6 @@
 {
   "suggested_merges": [
     {
-      "from": "Acceptance",
-      "into": "Letter of Acceptance",
-      "type": "organization"
-    },
-    {
       "from": "Agarwal",
       "into": "Vishal Agarwal",
       "type": "organization"
@@ -13,11 +8,6 @@
     {
       "from": "Alliance",
       "into": "Frontier Alliance",
-      "type": "organization"
-    },
-    {
-      "from": "Allied",
-      "into": "Supreme Allied",
       "type": "organization"
     },
     {
@@ -36,18 +26,8 @@
       "type": "organization"
     },
     {
-      "from": "Arab",
-      "into": "Gulf Arab",
-      "type": "group"
-    },
-    {
       "from": "Arihant",
       "into": "INS Arihant",
-      "type": "organization"
-    },
-    {
-      "from": "Bauer",
-      "into": "Austrian Ministry of Defense spokesperson Michael Bauer",
       "type": "organization"
     },
     {
@@ -86,18 +66,8 @@
       "type": "organization"
     },
     {
-      "from": "EECS",
-      "into": "Department of EECS",
-      "type": "organization"
-    },
-    {
       "from": "Emirates",
       "into": "United Arab Emirates",
-      "type": "place"
-    },
-    {
-      "from": "England",
-      "into": "New England",
       "type": "place"
     },
     {
@@ -151,11 +121,6 @@
       "type": "organization"
     },
     {
-      "from": "Home",
-      "into": "Mountain Home",
-      "type": "place"
-    },
-    {
       "from": "Honeycutt",
       "into": "Olivia Honeycutt",
       "type": "organization"
@@ -196,11 +161,6 @@
       "type": "place"
     },
     {
-      "from": "Lebanon",
-      "into": "South Lebanon",
-      "type": "place"
-    },
-    {
       "from": "Lithuania",
       "into": "\u0160iauliai, Lithuania",
       "type": "place"
@@ -209,11 +169,6 @@
       "from": "LOCUST",
       "into": "kW LOCUST",
       "type": "organization"
-    },
-    {
-      "from": "London",
-      "into": "New London",
-      "type": "place"
     },
     {
       "from": "Marines",
@@ -228,11 +183,6 @@
     {
       "from": "MBA",
       "into": "Stanford MBA",
-      "type": "organization"
-    },
-    {
-      "from": "MIT",
-      "into": "Broad Institute of MIT",
       "type": "organization"
     },
     {
@@ -256,29 +206,14 @@
       "type": "organization"
     },
     {
-      "from": "Oman",
-      "into": "Gulf of Oman",
-      "type": "place"
-    },
-    {
       "from": "Skills",
       "into": "Science Skills",
       "type": "organization"
     },
     {
-      "from": "Somalia",
-      "into": "Federal Republic of Somalia",
-      "type": "place"
-    },
-    {
       "from": "SSH",
       "into": "Remote SSH",
       "type": "organization"
-    },
-    {
-      "from": "Stockholm",
-      "into": "City of Stockholm",
-      "type": "place"
     },
     {
       "from": "Teachers",
@@ -314,6 +249,11 @@
       "from": "UXD",
       "into": "Humane UXD",
       "type": "organization"
+    },
+    {
+      "from": "California",
+      "into": "Southern California",
+      "type": "place"
     }
   ],
   "history": [
@@ -321,6 +261,182 @@
       "nodes": 6238,
       "singletons": 4173,
       "new_suggestions": 63
+    },
+    {
+      "nodes": 4939,
+      "singletons": 3150,
+      "new_merges": 1,
+      "new_ignores": 63
+    },
+    {
+      "nodes": 4939,
+      "singletons": 3150,
+      "new_merges": 0,
+      "new_ignores": 0
+    },
+    {
+      "nodes": 4939,
+      "singletons": 3150,
+      "new_merges": 0,
+      "new_ignores": 23
+    },
+    {
+      "nodes": 4934,
+      "singletons": 3145,
+      "new_merges": 0,
+      "new_ignores": 0
+    }
+  ],
+  "suggested_ignores": [
+    {
+      "name": "carlos.hinojosa@saber.uis.edu.co Links",
+      "type": "person",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "Chelsea Finn Contact : tianheyu@cs.stanford.edu Links: Paper",
+      "type": "person",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "Christopher D Manning Contact : antoineb@cs.stanford.edu Links",
+      "type": "organization",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "Florian Shkurti Contact : cagia@stanford.edu",
+      "type": "organization",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "https://t.co/Inb3yOuGfM \u2014 Bloomberg",
+      "type": "person",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "I. Zeki Yalniz Contact : cody@cs.stanford.edu Links: Paper Keywords",
+      "type": "organization",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "Tyler@twz.com",
+      "type": "organization",
+      "reason": "contains URL or handle characters"
+    },
+    {
+      "name": "Arrowhead 120",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Assumption 1",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Assumption 2",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Aster 30",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Block 2",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Formula 1",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Frozen 2",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Gemini 3",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Gemma 2",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Gemma 4",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Google 4",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Group 1",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Group 2",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Land 156",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Lot 2",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Lyria 3",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Mayhem 10",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Move 37",
+      "type": "event",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Rogue 1",
+      "type": "person",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Theorem 1",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Tranche 1",
+      "type": "product",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Tranche 4",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
+    },
+    {
+      "name": "Zone 5",
+      "type": "organization",
+      "reason": "looks like a generic version tag"
     }
   ]
 }

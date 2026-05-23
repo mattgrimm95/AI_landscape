@@ -271,15 +271,19 @@ def cmd_review(_args):
     finally:
         kg.close()
     print(review.render_review(data))
-    added = review.save_review(data, config.REVIEW_FILE)
+    counts = review.save_review(data, config.REVIEW_FILE)
     print(
-        "\n%d new merge suggestion(s) recorded in %s"
-        % (added, config.REVIEW_FILE)
+        "\n%d new merge suggestion(s), %d new ignore suggestion(s) recorded in %s"
+        % (counts["merges"], counts["ignores"], config.REVIEW_FILE)
     )
-    if added:
+    if counts["merges"]:
         print(
-            "review them, then apply with: ailandscape correct merge "
+            "apply merges with: ailandscape correct merge "
             "\"<from>\" \"<into>\""
+        )
+    if counts["ignores"]:
+        print(
+            "apply ignores with: ailandscape correct ignore \"<name>\""
         )
     return 0
 

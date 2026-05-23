@@ -266,6 +266,38 @@ async function selectNode(id) {
   highlightNeighborhood(id);
 }
 
+function attributesHtml(attrs) {
+  attrs = attrs || {};
+  const keys = Object.keys(attrs);
+  if (!keys.length) return "";
+  const labels = {
+    email: "Email", role: "Role", affiliation: "Affiliation",
+    phone: "Phone", website: "Website",
+  };
+  return (
+    "<h3>Attributes</h3>" +
+    '<ul class="attributes">' +
+    keys
+      .map((k) => {
+        const v = attrs[k];
+        const label = labels[k] || k;
+        if (k === "email") {
+          return (
+            '<li><span class="attr-key">' + escapeHtml(label) +
+            '</span><a href="mailto:' + encodeURI(v) + '">' +
+            escapeHtml(v) + "</a></li>"
+          );
+        }
+        return (
+          '<li><span class="attr-key">' + escapeHtml(label) +
+          "</span>" + escapeHtml(String(v)) + "</li>"
+        );
+      })
+      .join("") +
+    "</ul>"
+  );
+}
+
 function articlesHtml(docs) {
   const list = (docs && docs.documents) || [];
   if (!list.length) return "";
@@ -298,6 +330,7 @@ function renderDetail(data, docs) {
     '<div class="entity-meta">' +
     '<span class="badge" style="background:' + color + '">' + escapeHtml(n.type) +
     "</span>" + n.mentions + " mentions · " + n.documents + " documents</div>" +
+    attributesHtml(n.attributes) +
     "<h3>Top connections (" + data.neighbors.length + ")</h3>" +
     '<ul class="neighbors">' +
     neighbors
@@ -513,6 +546,7 @@ async function showDossier(id) {
       escapeHtml((n.first_seen || "?").slice(0, 10)) + " – " +
       escapeHtml((n.last_seen || "?").slice(0, 10)) + "</div>";
   }
+  html += attributesHtml(n.attributes);
   if (typed.length) {
     html +=
       "<h3>Typed relationships (" + typed.length + ")</h3>" +

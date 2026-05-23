@@ -153,6 +153,17 @@ ul.neighbors li em.rel { color: #a8c8ff; font-size: 11px; white-space: nowrap; }
   margin-top: 2px;
 }
 
+ul.attributes { list-style: none; font-size: 12px; margin: 2px 0 8px; }
+ul.attributes li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+ul.attributes .attr-key { color: var(--muted); min-width: 72px; }
+ul.attributes a { color: var(--accent); text-decoration: none; }
+ul.attributes a:hover { text-decoration: underline; }
+
 ul.articles { list-style: none; max-height: 240px; overflow-y: auto; }
 ul.articles li { padding: 5px 6px; border-radius: 5px; }
 ul.articles li:hover { background: var(--panel); }

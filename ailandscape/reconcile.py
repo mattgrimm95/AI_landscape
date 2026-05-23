@@ -12,7 +12,7 @@ import json
 import pathlib
 import re
 
-from . import corpus, relations
+from . import corpus, gazetteer, relations
 
 # Normalized aliases dropped as noise regardless of corrections.
 _DEFAULT_IGNORE = {
@@ -25,15 +25,45 @@ _DEFAULT_IGNORE = {
 # keeping the co-occurrence graph from exploding on very long pages.
 _MAX_EDGE_ENTITIES = 60
 
-# A lone capitalized word (untyped "misc" entity) is kept only if at least
-# this many distinct documents mention it — most one-off capitalized words
-# are sentence-initial noise rather than real named entities.
-_MIN_SINGLE_MISC_DF = 2
+# A single-word entity is kept only if at least this many distinct documents
+# mention it — most one-off capitalized words ("Designs", "Allies", "Vision")
+# are sentence-initial / common-noun noise rather than real named entities.
+# Gazetteer-canonical entities ("Pentagon", "Anduril", etc.) are always kept,
+# regardless of frequency.
+_MIN_SINGLE_WORD_DF = 2
 
 # A leading article ("the"/"a"/"an") on an entity surface form is almost
 # always an NER span artifact ("the Naval Surface Warfare Center"); it is
 # stripped from both the dedup key and the display name.
 _LEADING_ARTICLE = re.compile(r"^(?:the|an|a)\s+", re.IGNORECASE)
+
+# Boilerplate that often gets glued onto an entity name when a scraped page
+# concatenated a person's name with their contact block — academic
+# researcher pages render "Name Contact : email Links: Paper" without
+# clear separators and NER captures the whole thing as one entity.
+_ATTR_BOILERPLATE = re.compile(
+    r"\s*(?:Contact|Links?|Email|Phone)\s*[:：]", re.IGNORECASE
+)
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def _split_attributes(text):
+    """Strip attribute-block boilerplate off an entity name.
+
+    Returns (clean_name, attrs) where `attrs` may carry an `email` key when
+    one was found in the original text. The email is kept as a structured
+    attribute on the node so it stays available when the entity is clicked.
+    """
+    if not text:
+        return text, {}
+    attrs = {}
+    emails = _EMAIL_RE.findall(text)
+    if emails:
+        attrs["email"] = emails[0]
+    name = _ATTR_BOILERPLATE.split(text, maxsplit=1)[0]
+    name = _EMAIL_RE.sub("", name)
+    name = name.strip(" ,;:.")
+    return name, attrs
 
 
 def _singularize(token):
@@ -46,6 +76,14 @@ def _singularize(token):
 def _strip_article(name):
     """Drop a leading article from an entity's display name."""
     return _LEADING_ARTICLE.sub("", name)
+
+
+def _gazetteer_canonicals():
+    """Normalized canonical names of every gazetteer entry — these are
+    trusted and never pruned, regardless of how rarely they appear."""
+    return frozenset(
+        normalize(canonical) for canonical, _type in gazetteer.GAZETTEER.values()
+    )
 
 
 def normalize(text):
@@ -144,6 +182,8 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
     merge, ignore = corrections if corrections else ({}, set())
     # Normalize the default ignore terms so they match normalized aliases.
     ignore = set(ignore) | {normalize(x) for x in _DEFAULT_IGNORE}
+    # Gazetteer canonicals are always trusted in the final precision pass.
+    gazetteer_canonicals = _gazetteer_canonicals()
 
     # Pass 1: cache each document's entities and count document frequency —
     # how many distinct documents mention each normalized alias.
@@ -172,28 +212,32 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             return True
         if " " in alias:
             return True
-        return doc_freq.get(alias, 0) >= _MIN_SINGLE_MISC_DF
+        return doc_freq.get(alias, 0) >= _MIN_SINGLE_WORD_DF
 
     def resolve(entity):
-        alias = normalize(entity["text"])
+        raw_text = (entity.get("text") or "").strip()
+        clean_text, attrs = _split_attributes(raw_text)
+        if not clean_text:
+            clean_text = raw_text
+        alias = normalize(clean_text)
         if not alias or alias in ignore or _is_noise(alias):
             return None
         if not keep(entity, alias):
             return None
         if alias in alias_index:
-            return alias_index[alias], None, entity["label"], alias
+            return alias_index[alias], None, entity["label"], alias, attrs
         # A human-curated merge value is the display name verbatim; a raw
         # surface form has its leading-article NER artifact stripped.
         if alias in merge:
             canonical = merge[alias]
         else:
-            canonical = _strip_article(entity["text"].strip())
+            canonical = _strip_article(clean_text)
         key = normalize(canonical)
         if not key:
             return None
         alias_index[alias] = key
         alias_index.setdefault(key, key)
-        return key, canonical, entity["label"], alias
+        return key, canonical, entity["label"], alias, attrs
 
     for doc in documents:
         # Date a node by when the news was published, not when it was
@@ -206,7 +250,7 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             resolved = resolve(entity)
             if resolved is None:
                 continue
-            key, canonical, etype, alias = resolved
+            key, canonical, etype, alias, attrs = resolved
             node = nodes.get(key)
             if node is None:
                 node = {
@@ -217,12 +261,17 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
                     "aliases": set(),
                     "first": doc_date,
                     "last": doc_date,
+                    "attributes": {},
                 }
                 nodes[key] = node
             node["mentions"] += 1
             node["docs"].add(doc["content_hash"])
             node["aliases"].add(alias)
             node["aliases"].add(key)
+            if attrs:
+                # Last-write-wins per attribute key. A later mention of the
+                # same person can carry a more complete attribute set.
+                node["attributes"].update(attrs)
             if node["type"] == "misc" and etype != "misc":
                 node["type"] = etype
             if doc_date:
@@ -253,6 +302,8 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         tgt["mentions"] += src["mentions"]
         tgt["docs"] |= src["docs"]
         tgt["aliases"] |= src["aliases"]
+        for attr_key, attr_value in src.get("attributes", {}).items():
+            tgt.setdefault("attributes", {}).setdefault(attr_key, attr_value)
         if src["first"]:
             tgt["first"] = min(tgt["first"] or src["first"], src["first"])
         if src["last"]:
@@ -269,6 +320,34 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             remapped[pair] = remapped.get(pair, 0) + weight
         edges = remapped
         log("coreference: merged %d partial-name nodes" % len(merge_into))
+
+    # Final precision pass: a single-word entity that is not gazetteer-
+    # trusted, was not folded into a multi-word coreference target, and
+    # either has a non-proper-noun shape (lowercase / non-letter initial)
+    # or appears in fewer than _MIN_SINGLE_WORD_DF documents is dropped
+    # along with its edges. This sweeps out sentence-initial / common-
+    # noun noise ("Designs", "Allies", "Vision", "kin", "drogue") that
+    # NER mistakenly typed as a real entity.
+    weak = set()
+    for key, node in list(nodes.items()):
+        canonical = node["canonical"] or ""
+        if " " in canonical:
+            continue
+        if normalize(canonical) in gazetteer_canonicals:
+            continue
+        if not canonical or not canonical[0].isalpha() or not canonical[0].isupper():
+            weak.add(key)
+        elif len(node["docs"]) < _MIN_SINGLE_WORD_DF:
+            weak.add(key)
+    for key in weak:
+        del nodes[key]
+    if weak:
+        edges = {
+            pair: w
+            for pair, w in edges.items()
+            if pair[0] not in weak and pair[1] not in weak
+        }
+        log("pruned %d weak single-word nodes" % len(weak))
 
     # Resolve extracted relations to node keys (after coreference merges) and
     # tally repeated relationships into directed, weighted typed edges. The
@@ -295,6 +374,7 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
     kg_store.clear()
     key_to_id = {}
     for key, node in sorted(nodes.items()):
+        attrs = node.get("attributes") or {}
         key_to_id[key] = kg_store.insert_node(
             canonical_name=node["canonical"],
             node_type=node["type"],
@@ -302,6 +382,7 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
             last_seen=node["last"],
             mention_count=node["mentions"],
             document_count=len(node["docs"]),
+            metadata={"attributes": attrs} if attrs else None,
         )
         for alias in sorted(node["aliases"]):
             kg_store.insert_alias(key_to_id[key], alias)
