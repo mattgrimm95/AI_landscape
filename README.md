@@ -59,9 +59,11 @@ python -m ailandscape.cli sbir       # pull AI-related SBIR/STTR awards, then re
 python -m ailandscape.cli demo       # run the flow on the bundled sample feed
 python -m ailandscape.cli stats      # quick corpus / database counts
 python -m ailandscape.cli overview   # full statistical overview of the data
+python -m ailandscape.cli overview --diff   # KPI deltas between the last two runs
 python -m ailandscape.cli serve      # interactive web app at 127.0.0.1:8000
 python -m ailandscape.cli visualize  # export a static interactive HTML graph
 python -m ailandscape.cli correct merge "DoD" "Department of Defense"
+python -m ailandscape.cli correct-from-review --merges --acronyms   # bulk-apply review.json
 python -m ailandscape.cli snapshot   # export corpus + databases to snapshots/
 python -m ailandscape.cli reset --confirm   # delete the derived databases
 ```

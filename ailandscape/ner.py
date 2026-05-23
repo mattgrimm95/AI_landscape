@@ -37,7 +37,13 @@ _PERSON_TITLES = {
 }
 _ORG_SUFFIXES = {"inc", "corp", "ltd", "llc", "co", "company", "group"}
 
-# Capitalized words that should not, alone, begin an entity.
+# Capitalized words that should not, alone, begin an entity. Includes a
+# small set of common sentence-initial English verbs ("Use", "Call", "Set",
+# "Let") that real-world prose frequently capitalizes at the start of a
+# sentence but that are practically never the first token of a real named
+# entity. Without these, a sentence like "Use ArrayBuffer ..." chains
+# "Use ArrayBuffer" into a synthetic two-word "entity" that escapes the
+# single-word document-frequency filter downstream.
 _STOPWORDS = {
     "The", "A", "An", "This", "That", "These", "Those", "It", "He", "She",
     "They", "We", "I", "But", "And", "Or", "In", "On", "At", "For", "To",
@@ -47,6 +53,12 @@ _STOPWORDS = {
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
     "Sunday", "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
+    # Common sentence-initial imperative verbs / sentence-stem words.
+    "Use", "Uses", "Call", "Calls", "Set", "Sets", "Get", "Gets",
+    "Let", "Lets", "Make", "Makes", "Take", "Takes", "See", "Sees",
+    "Visit", "Try", "Click", "Open", "Send", "Run", "Read", "Write",
+    "Save", "Load", "Add", "Remove", "Delete", "Update", "Create",
+    "Then", "Now", "So", "Yet", "Still", "Even", "Just",
 }
 _CONNECTORS = {"of", "the", "and", "for", "de"}
 
@@ -113,14 +125,28 @@ def _extract_proper_nouns(text, exclude_spans):
         # stripped below.
         part_starts = [tokens[i][1]]
         j = i + 1
-        while j < n:
+        # A token whose raw form ends with sentence-terminating punctuation
+        # closes the chain there: "C. Solve for X" must not glue "C" onto
+        # "Solve for X" as a single entity ("C Solve for X"). Abbreviations
+        # like "Mr." / "Corp." also terminate, which loses the chained form
+        # but recovers the real entity ("Smith" / "Acme Corp") via the
+        # following chain or the person-title / org-suffix paths.
+        sentence_end = word.rstrip()[-1:] in (".", "!", "?")
+        while j < n and not sentence_end:
             w2, _s2, e2 = tokens[j]
             c2 = _clean(w2)
-            if c2 and c2[0].isupper() and c2 not in _STOPWORDS:
+            # Continuation tokens must be at least two characters: a lone
+            # capital letter ("X" in "Solve for X" or "Let X = ...") is a
+            # math/code reference, not an entity word. We pay a small price
+            # on middle-initial names ("John F. Kennedy" → "John" + "Kennedy")
+            # to keep math-laden text from synthesizing pseudo-entities.
+            if c2 and len(c2) >= 2 and c2[0].isupper() and c2 not in _STOPWORDS:
                 parts.append(c2)
                 part_starts.append(_s2)
                 seq_end = e2
                 j += 1
+                if w2.rstrip()[-1:] in (".", "!", "?"):
+                    sentence_end = True
                 continue
             # Connector handling: a phrase may bridge one or two lowercase
             # connectors ("of", "the", "and", "for", "de") if a capitalized
@@ -138,12 +164,14 @@ def _extract_proper_nouns(text, exclude_spans):
                 ):
                     connector_run.append(k)
                     k += 1
+                bridge_target = _clean(tokens[k][0]) if k < n else ""
                 if (
                     k < n
                     and connector_run
-                    and _clean(tokens[k][0])
-                    and _clean(tokens[k][0])[0].isupper()
-                    and _clean(tokens[k][0]) not in _STOPWORDS
+                    and bridge_target
+                    and len(bridge_target) >= 2
+                    and bridge_target[0].isupper()
+                    and bridge_target not in _STOPWORDS
                 ):
                     for ci in connector_run:
                         parts.append(_clean(tokens[ci][0]).lower())
@@ -173,6 +201,20 @@ def _extract_proper_nouns(text, exclude_spans):
         if _clean(parts[-1]).lower() in _ORG_SUFFIXES:
             label = "organization"
         phrase = " ".join(parts)
+        # An ALL-CAPS multi-word phrase is almost always a section header
+        # or banner ("BREAKING NEWS", "TOP STORIES"), not a real named
+        # entity. Real multi-word organizations / places have mixed case;
+        # all-caps acronyms ("USAID", "DARPA") still survive because they
+        # are single-word, and gazetteer entries (which match
+        # case-insensitively) catch the ones we curate.
+        non_connector = [p for p in parts if p.lower() not in _CONNECTORS]
+        if (
+            len(non_connector) >= 2
+            and all(p.isupper() and any(ch.isalpha() for ch in p)
+                    for p in non_connector)
+        ):
+            i = j
+            continue
         if len(phrase) >= 3 and not _overlaps(start, seq_end, exclude_spans):
             out.append(
                 {"text": phrase, "label": label, "start": start, "end": seq_end}

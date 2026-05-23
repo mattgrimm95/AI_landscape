@@ -338,6 +338,51 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(summary["nodes"], 1)
         self.assertIsNotNone(self.kg.node_by_alias("pentagon"))
 
+    def test_email_coreference_merges_persons_sharing_address(self):
+        # Two person nodes with slightly different name forms but the same
+        # email attribute should fold into one node. The surname-only
+        # coreference rule cannot catch this — both names are multi-word
+        # and don't share a surname.
+        self._add_doc("h1", [{
+            "text": "Jane Doe Contact : jane@example.org Links: Paper",
+            "label": "person",
+        }])
+        self._add_doc("h2", [{
+            "text": "J. R. Doe Contact : jane@example.org Links: Bio",
+            "label": "person",
+        }])
+        # Mention them again so they survive the single-doc prune.
+        self._add_doc("h3", [{
+            "text": "Jane Doe", "label": "person",
+        }])
+        self._add_doc("h4", [{
+            "text": "J. R. Doe", "label": "person",
+        }])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        self.assertEqual(summary["nodes"], 1)
+        # Mentions from both forms accumulate on the winner.
+        node = self.kg.nodes()[0]
+        self.assertEqual(node["mention_count"], 4)
+        self.assertEqual(node["document_count"], 4)
+
+    def test_email_coreference_skips_shared_inbox(self):
+        # Two people legitimately appear under press@…/info@…, so a shared
+        # mailbox address must NOT be a person-merge signal.
+        self._add_doc("h1", [{
+            "text": "Alice Anderson Contact : press@example.org",
+            "label": "person",
+        }])
+        self._add_doc("h2", [{
+            "text": "Bob Brown Contact : press@example.org",
+            "label": "person",
+        }])
+        self._add_doc("h3", [{"text": "Alice Anderson", "label": "person"}])
+        self._add_doc("h4", [{"text": "Bob Brown", "label": "person"}])
+        summary = reconcile.reconcile(self.documents, self.ner, self.kg)
+        # Both nodes survive; the shared "press@" inbox is not enough to
+        # collapse two distinct people into one.
+        self.assertEqual(summary["nodes"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

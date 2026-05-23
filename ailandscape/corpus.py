@@ -243,24 +243,41 @@ def published_date(doc):
     normalized. This lets node first/last-seen reflect when news happened,
     not when it was scraped. Returns '' if no date can be recovered.
     """
+    date, _status = published_date_status(doc)
+    return date
+
+
+def published_date_status(doc):
+    """Like `published_date`, but also reports why a parse returned ''.
+
+    Returns ``(date, status)`` where ``status`` is one of:
+      * ``"parsed"``      — a date string was present and parsed successfully
+      * ``"missing"``     — the document carried no `published` field at all
+      * ``"unparseable"`` — a date string was present but matched no known
+                            format (RFC-822, ISO-8601, bare date, bare year)
+
+    Distinguishing "missing" from "unparseable" lets the overview surface
+    feeds that ship a date format the pipeline silently can't read, rather
+    than burying both as just ``""``.
+    """
     text = (doc.get("published") or "").strip()
     if not text:
-        return ""
+        return "", "missing"
     try:
         parsed = email.utils.parsedate_to_datetime(text)
         if parsed is not None:
-            return parsed.date().isoformat()
+            return parsed.date().isoformat(), "parsed"
     except (TypeError, ValueError):
         pass
     try:
         iso = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
-        return iso.date().isoformat()
+        return iso.date().isoformat(), "parsed"
     except ValueError:
         pass
     match = re.match(r"\d{4}-\d{2}-\d{2}", text)
     if match:
-        return match.group(0)
+        return match.group(0), "parsed"
     match = re.match(r"(\d{4})$", text)
     if match:
-        return match.group(1) + "-01-01"
-    return ""
+        return match.group(1) + "-01-01", "parsed"
+    return "", "unparseable"

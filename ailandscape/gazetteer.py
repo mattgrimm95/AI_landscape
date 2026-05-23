@@ -506,3 +506,111 @@ GAZETTEER = {
     "corl": ("CoRL", "organization"),
     "acl": ("ACL", "organization"),
 }
+
+
+# AI capability taxonomy. Groups the `concept` entities into the subfields an
+# AI / defense reader thinks in — LLMs, RL, perception, autonomy, ISR/C2,
+# cyber/EW, directed-energy/hypersonics, and the named defense programs that
+# tie those capabilities to deployment. Each subfield is a curated list of
+# canonical names that appear (or could appear) in GAZETTEER as concept-type
+# entries. `concepts_for_subfield()` resolves these to live graph nodes by
+# canonical-name match; new capabilities added to GAZETTEER are picked up
+# automatically once they're listed below.
+#
+# Kept hand-curated rather than auto-derived so a curator stays in control of
+# how subfields are presented to a learner — the whole purpose of the
+# Capabilities view is editorial scaffolding for the AI expert who wants a
+# map of their territory, not yet another auto-generated cluster.
+SUBFIELDS = (
+    {
+        "id": "foundation_models",
+        "label": "Foundation models & LLMs",
+        "tagline": "Large generative models — text, image, multimodal.",
+        "concepts": (
+            "Large Language Models", "Foundation Models", "Generative AI",
+            "Agentic AI", "Diffusion Models", "Model Collapse",
+        ),
+    },
+    {
+        "id": "machine_learning",
+        "label": "Machine learning & reinforcement learning",
+        "tagline": "The training-and-optimization core under everything else.",
+        "concepts": (
+            "Machine Learning", "Deep Learning", "Neural Networks",
+            "Reinforcement Learning", "Supervised Learning",
+            "Transfer Learning", "Federated Learning",
+        ),
+    },
+    {
+        "id": "perception",
+        "label": "Perception — vision, speech, NLP",
+        "tagline": "Turning sensor and language data into structured signals.",
+        "concepts": (
+            "Computer Vision", "Natural Language Processing",
+            "Speech Recognition", "Facial Recognition", "Object Detection",
+            "Pattern Recognition", "Anomaly Detection", "Sensor Fusion",
+        ),
+    },
+    {
+        "id": "autonomy",
+        "label": "Autonomy & robotics",
+        "tagline": "Self-directed systems on the ground, in the air, at sea.",
+        "concepts": (
+            "Autonomy", "Autonomous Systems", "Autonomous Weapons",
+            "Robotics", "Drone Swarm", "Swarm Intelligence",
+            "Human-Machine Teaming", "Autonomous Warfare",
+        ),
+    },
+    {
+        "id": "isr_c2",
+        "label": "ISR & command-and-control",
+        "tagline": "Sensing, fusing, deciding — the defense AI core loop.",
+        "concepts": (
+            "ISR", "Automatic Target Recognition", "Decision Support",
+            "Command and Control", "Edge Computing", "Digital Twin",
+            "Predictive Analytics", "Predictive Maintenance",
+            "Data Analytics", "Synthetic Data",
+        ),
+    },
+    {
+        "id": "cyber_ew",
+        "label": "Cyber & electronic warfare",
+        "tagline": "Defending and attacking through code and the spectrum.",
+        "concepts": (
+            "Cyber Warfare", "Electronic Warfare", "Cybersecurity",
+        ),
+    },
+    {
+        "id": "directed_energy",
+        "label": "Directed energy & hypersonics",
+        "tagline": "Lasers, microwaves, and Mach-5+ kinetics.",
+        "concepts": (
+            "Hypersonic Weapons",
+        ),
+    },
+    {
+        "id": "defense_programs",
+        "label": "Defense AI programs",
+        "tagline": "The named initiatives wiring AI into U.S. doctrine.",
+        "concepts": (
+            "Replicator Initiative", "AI Arsenal Initiative",
+            "Collaborative Combat Aircraft",
+            "Medium Unmanned Surface Vessel", "Loitering Munitions",
+            "Launched Effects", "Drone Wingman", "FPV Drone",
+        ),
+    },
+)
+
+
+def subfield_for_concept(canonical_name):
+    """Return the subfield id a concept belongs to, or None.
+
+    Lets the frontend tag a concept node with its subfield without a second
+    lookup. A concept that isn't in any subfield list is treated as
+    uncategorized — present in the graph, just not on the Capabilities map.
+    """
+    target = (canonical_name or "").strip()
+    for subfield in SUBFIELDS:
+        if target in subfield["concepts"]:
+            return subfield["id"]
+    return None

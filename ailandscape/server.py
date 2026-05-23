@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import (
-    briefing, config, corpus, reconcile, report, synthesis, tours, trends,
-    visualize,
+    briefing, capabilities, config, corpus, reconcile, report, synthesis,
+    tours, trends, visualize,
 )
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -499,15 +499,211 @@ def api_recent(
         kg.close()
 
 
-@app.get("/api/briefing")
-def api_briefing(days: int = Query(7, ge=1, le=90)):
-    """A generated briefing of the landscape as structured JSON."""
+@app.get("/api/pulse")
+def api_pulse(days: int = Query(7, ge=1, le=30)):
+    """A short always-visible "what's happening" strip.
+
+    Three signals the header pulse renders in one row:
+      * new entities in the last ``days`` days,
+      * the single top spike entity (or null if no spike right now),
+      * total dollar value of SBIR/STTR awards in the corpus.
+
+    Pulled once on page load and refreshed by the surrounding views; very
+    cheap because every input is already cached.
+    """
     documents = _cached_corpus()
     kg = KnowledgeGraphStore(config.KG_DB)
     try:
-        return briefing.build_briefing(documents, kg, days=days)
+        recent = trends.build_recent(documents, kg, days=days)
+        spikes = trends.build_spikes(documents, kg, limit=1)
     finally:
         kg.close()
+    sbir_total = sum(
+        ((d.get("metadata") or {}).get("award_amount") or 0)
+        for d in documents
+        if (d.get("metadata") or {}).get("data_source") == "SBIR"
+    )
+    return {
+        "new_entities_window_days": days,
+        "new_entities": recent.get("new_entity_total", 0),
+        "top_spike": spikes[0] if spikes else None,
+        "sbir_total_amount": int(sbir_total),
+    }
+
+
+@app.get("/api/spikes")
+def api_spikes(limit: int = Query(20, ge=1, le=100)):
+    """Entities whose recent mention rate is sharply above their baseline.
+
+    Returned ids are used by the frontend as a Set to add a small "↑"
+    badge to entity rows site-wide (search results, dashboard, briefing,
+    sidebar lists). See `trends.build_spikes` for the gate.
+    """
+    documents = _cached_corpus()
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        return {"spikes": trends.build_spikes(documents, kg, limit=limit)}
+    finally:
+        kg.close()
+
+
+@app.get("/api/capabilities")
+def api_capabilities():
+    """The AI subfield map — one card per subfield with leading concepts +
+    top organizations + mention totals. Powers the Capabilities modal."""
+    nodes, edges = _cached_graph()
+    return {"subfields": capabilities.build_capabilities(nodes, edges)}
+
+
+@app.get("/api/trajectory")
+def api_trajectory(months: int = Query(12, ge=2, le=36)):
+    """Corpus-wide month-by-month trajectory.
+
+    Returns one bucket per month for the last ``months`` months with
+    document count, new-entity count, typed-relation count, and the
+    entity-type breakdown of new entities. Powers the Trajectory modal —
+    a "many months at a glance" view the existing Trends modal doesn't
+    offer.
+    """
+    documents = _cached_corpus()
+    kg = KnowledgeGraphStore(config.KG_DB)
+    try:
+        return trends.build_trajectory(documents, kg, months=months)
+    finally:
+        kg.close()
+
+
+@app.get("/api/node/{node_id}/adjacent")
+def api_node_adjacent(node_id: int, limit: int = Query(6, ge=1, le=20)):
+    """Entities two hops away from this one — the "you may not know" list.
+
+    Surfaces the territory the user is close to but hasn't crossed into yet.
+    Algorithm: walk co-occurrence edges to get the 1-hop neighborhood, then
+    walk again from each neighbor to collect 2-hop candidates. Each candidate
+    is scored by the number of intermediate neighbors it shares with the
+    source — a high score means many indirect paths, which usually means
+    the two entities operate in adjacent territory. Direct neighbors are
+    excluded (they're already shown under "Often appears with").
+    """
+    nodes, edges = _load_graph()
+    by_id = {n["id"]: n for n in nodes}
+    if node_id not in by_id:
+        raise HTTPException(status_code=404, detail="entity not found")
+    # Build the neighbor index once.
+    neighbors = collections.defaultdict(set)
+    for edge in edges:
+        neighbors[edge["src_id"]].add(edge["dst_id"])
+        neighbors[edge["dst_id"]].add(edge["src_id"])
+    direct = neighbors.get(node_id, set())
+    shared = collections.Counter()
+    for hop1 in direct:
+        for hop2 in neighbors.get(hop1, set()):
+            if hop2 == node_id or hop2 in direct:
+                continue
+            shared[hop2] += 1
+    ranked = []
+    for other_id, count in shared.most_common(limit):
+        other = by_id.get(other_id)
+        if other is None:
+            continue
+        entry = _node_json(other)
+        entry["shared_neighbors"] = count
+        ranked.append(entry)
+    return {"adjacent": ranked}
+
+
+@app.get("/api/briefing")
+def api_briefing(
+    days: int = Query(7, ge=1, le=90),
+    subfield: Optional[str] = None,
+):
+    """A generated briefing of the landscape as structured JSON.
+
+    The optional `subfield` (an id from `gazetteer.SUBFIELDS`) scopes the
+    briefing to one capability area — same shape, just narrower.
+    """
+    documents = _cached_corpus()
+    kg = KnowledgeGraphStore(config.KG_DB)
+    subfield_concepts = (
+        capabilities.subfield_concept_names(subfield) if subfield else None
+    )
+    try:
+        return briefing.build_briefing(
+            documents, kg, days=days, subfield_concepts=subfield_concepts,
+        )
+    finally:
+        kg.close()
+
+
+@app.get("/api/hype")
+def api_hype(days: int = Query(1, ge=1, le=7)):
+    """An exciting, 30-second-read hype summary of the most recent day's news.
+
+    Pulls documents published or fetched within the last ``days`` days (a
+    soft fallback to 3 days kicks in when day 1 is empty so a quiet news
+    day still produces something), then asks Claude to write a short,
+    vivid hype piece. Strictly opt-in via ``ANTHROPIC_API_KEY`` — the
+    endpoint returns ``available=False`` (not an error) without a key so
+    the UI can render the feature without ever attempting the call.
+    """
+    if not synthesis.is_configured():
+        return {
+            "available": False,
+            "message": "Set ANTHROPIC_API_KEY to enable the daily hype read.",
+        }
+    documents = _cached_corpus()
+    today = datetime.date.today()
+    cutoff_main = today - datetime.timedelta(days=days)
+    cutoff_fallback = today - datetime.timedelta(days=3)
+    recent = []
+    for doc in documents:
+        date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
+        if not date_str:
+            continue
+        try:
+            doc_date = datetime.date.fromisoformat(date_str[:10])
+        except ValueError:
+            continue
+        if doc_date >= cutoff_main:
+            recent.append(doc)
+    if not recent:
+        # Soft fallback so a quiet 24-hour window still produces output.
+        for doc in documents:
+            date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
+            if not date_str:
+                continue
+            try:
+                doc_date = datetime.date.fromisoformat(date_str[:10])
+            except ValueError:
+                continue
+            if doc_date >= cutoff_fallback:
+                recent.append(doc)
+    # Most recent first; the prompt leans on the head of the list.
+    recent.sort(
+        key=lambda d: corpus.published_date(d)
+        or (d.get("fetched_at") or "")[:10],
+        reverse=True,
+    )
+    sbir_total = sum(
+        ((d.get("metadata") or {}).get("award_amount") or 0)
+        for d in documents
+        if (d.get("metadata") or {}).get("data_source") == "SBIR"
+    )
+    sbir_count = sum(
+        1 for d in documents
+        if (d.get("metadata") or {}).get("data_source") == "SBIR"
+    )
+    sbir_funding = {"awards": sbir_count, "total_amount": int(sbir_total)}
+    try:
+        hype = synthesis.summarize_hype(recent, sbir_funding=sbir_funding)
+    except synthesis.SynthesisError as exc:
+        return {"available": True, "error": str(exc)}
+    return {
+        "available": True,
+        "hype": hype,
+        "documents_used": len(recent),
+        "window_days": days,
+    }
 
 
 @app.get("/api/briefing/narrative")

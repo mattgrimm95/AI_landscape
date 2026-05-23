@@ -152,5 +152,111 @@ class ReviewTest(unittest.TestCase):
         self.assertIn("Hegseth", text)
 
 
+class GazetteerCandidatesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.kg = KnowledgeGraphStore(os.path.join(self.tmp, "kg.db"))
+
+    def tearDown(self):
+        self.kg.close()
+
+    def test_high_freq_misc_nodes_become_candidates(self):
+        # A multi-word misc node mentioned across many docs should surface
+        # as a gazetteer-add candidate.
+        self.kg.insert_node(
+            "Defense Tech Alliance", "misc",
+            mention_count=10, document_count=4,
+        )
+        # A multi-word *typed* node — already categorized; not a candidate.
+        self.kg.insert_node(
+            "Lockheed Martin", "organization",
+            mention_count=20, document_count=8,
+        )
+        # A single-word misc node — too prone to common-noun noise.
+        self.kg.insert_node(
+            "Alliance", "misc",
+            mention_count=15, document_count=6,
+        )
+        # Below mention threshold.
+        self.kg.insert_node(
+            "Sparse Mention Group", "misc",
+            mention_count=2, document_count=3,
+        )
+        self.kg.commit()
+        data = review.build_review([], self.kg)
+        names = [c["name"] for c in data["gazetteer_candidates"]]
+        self.assertIn("Defense Tech Alliance", names)
+        self.assertNotIn("Lockheed Martin", names)
+        self.assertNotIn("Alliance", names)
+        self.assertNotIn("Sparse Mention Group", names)
+
+    def test_existing_gazetteer_name_not_resurfaced(self):
+        # "Pentagon" is in the gazetteer; even if it shows up as `misc`
+        # in the graph (theoretical edge case), it should not be promoted
+        # as a candidate.
+        self.kg.insert_node(
+            "Pentagon", "misc",
+            mention_count=50, document_count=20,
+        )
+        self.kg.commit()
+        data = review.build_review([], self.kg)
+        names = [c["name"] for c in data["gazetteer_candidates"]]
+        self.assertNotIn("Pentagon", names)
+
+    def test_acronym_suggestions_surface_with_corroboration(self):
+        # Two documents define the same acronym ↔ expansion — corroborated,
+        # should surface. A third with a different mapping for the same
+        # acronym should also surface (as a separate suggestion).
+        docs = [
+            {"raw_text": (
+                "The Defense Advanced Research Projects Agency (DARPA) "
+                "announced the program."
+            )},
+            {"raw_text": (
+                "Officials at the Defense Advanced Research Projects Agency "
+                "(DARPA) confirmed."
+            )},
+        ]
+        data = review.build_review(docs, self.kg)
+        acros = {(a["acronym"], a["expansion"]) for a in data["acronym_suggestions"]}
+        self.assertIn(
+            ("DARPA", "Defense Advanced Research Projects Agency"), acros,
+        )
+
+    def test_save_review_carries_acronym_suggestions(self):
+        docs = [
+            {"raw_text": "The Department of Defense (DOD) said so."},
+            {"raw_text": "Officials at the Department of Defense (DOD)."},
+        ]
+        path = os.path.join(self.tmp, "review.json")
+        review.save_review(review.build_review(docs, self.kg), path)
+        store = json.loads(open(path, encoding="utf-8").read())
+        acros = {(a["acronym"], a["expansion"]) for a in store["acronym_suggestions"]}
+        self.assertIn(("DOD", "Department of Defense"), acros)
+
+    def test_gazetteer_candidates_refreshed_not_accumulated(self):
+        # First run produces a candidate. Then we drop it below threshold
+        # and run again — the candidate should be gone, not lingering.
+        self.kg.insert_node(
+            "Trending Topic", "misc",
+            mention_count=10, document_count=4,
+        )
+        self.kg.commit()
+        path = os.path.join(self.tmp, "review.json")
+        review.save_review(review.build_review([], self.kg), path)
+        store_1 = json.loads(open(path, encoding="utf-8").read())
+        self.assertEqual(
+            [c["name"] for c in store_1["gazetteer_candidates"]],
+            ["Trending Topic"],
+        )
+        # Now downgrade — same node, but only one mention left.
+        self.kg.conn.execute("UPDATE nodes SET mention_count = 1")
+        self.kg.commit()
+        review.save_review(review.build_review([], self.kg), path)
+        store_2 = json.loads(open(path, encoding="utf-8").read())
+        # The stale candidate is gone.
+        self.assertEqual(store_2["gazetteer_candidates"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

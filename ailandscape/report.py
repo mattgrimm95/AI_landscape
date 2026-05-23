@@ -14,6 +14,8 @@ import datetime
 import json
 import pathlib
 
+from . import corpus as corpus_mod
+
 
 def _read_last_run(run_history_path):
     """Return the most recent run-history record, or None."""
@@ -161,8 +163,209 @@ def build_overview(documents, ner_log, kg_store, run_history_path=None):
             "partial_name_dups": len(dups),
             "examples": dups[:5],
         },
+        "dates": _date_quality(documents),
+        "feeds": _feed_health(documents, run_history_path),
+        "signals": _signal_coverage(documents, ner_log, kg_store),
         "reading": _reading_stats(documents),
     }
+
+
+def _date_quality(documents):
+    """Per-source published-date parse coverage.
+
+    Surfaces feeds that ship dates in formats `corpus.published_date_status`
+    can't read (a silent data-quality leak today — `reconcile` then falls back
+    to `fetched_at`, conflating "we don't know" with "published today").
+    Returns a dict of total/parsed/missing/unparseable counts, plus a list of
+    per-source rows sorted by unparseable rate.
+    """
+    by_source = {}
+    for doc in documents:
+        source = doc.get("source") or "(unknown)"
+        bucket = by_source.setdefault(
+            source, {"total": 0, "parsed": 0, "missing": 0, "unparseable": 0}
+        )
+        _date, status = corpus_mod.published_date_status(doc)
+        bucket["total"] += 1
+        bucket[status] = bucket.get(status, 0) + 1
+    rows = []
+    for source, b in by_source.items():
+        unparseable_pct = (100.0 * b["unparseable"] / b["total"]) if b["total"] else 0.0
+        rows.append({
+            "source": source,
+            "total": b["total"],
+            "parsed": b["parsed"],
+            "missing": b["missing"],
+            "unparseable": b["unparseable"],
+            "unparseable_pct": unparseable_pct,
+        })
+    rows.sort(key=lambda r: (-r["unparseable_pct"], r["source"]))
+    totals = {
+        "total": sum(b["total"] for b in by_source.values()),
+        "parsed": sum(b["parsed"] for b in by_source.values()),
+        "missing": sum(b["missing"] for b in by_source.values()),
+        "unparseable": sum(b["unparseable"] for b in by_source.values()),
+    }
+    totals["parsed_pct"] = (
+        100.0 * totals["parsed"] / totals["total"] if totals["total"] else 0.0
+    )
+    # The "concerning" set is what a reader actually needs to act on.
+    concerning = [r for r in rows if r["unparseable"] > 0]
+    return {"totals": totals, "by_source": rows, "concerning": concerning}
+
+
+def _feed_health(documents, run_history_path):
+    """Per-feed scorecard derived from the corpus + run history.
+
+    For each source name appearing in the corpus, compute:
+      * `documents`              — total documents that source contributed
+      * `last_fetched_at`        — most recent fetched_at for that source
+      * `hours_since_fetched`    — hours since the most recent fetch
+      * `recent_runs_with_adds`  — over the last 14 run-history entries, how
+                                   many added new documents from this source
+
+    A feed with `recent_runs_with_adds == 0` and `hours_since_fetched > 14*24`
+    is likely silently broken — its URL stopped returning new entries weeks
+    ago and nothing surfaced the problem. Today this is invisible in the
+    overview; making it explicit is the point.
+    """
+    per_source = {}
+    for doc in documents:
+        source = doc.get("source") or "(unknown)"
+        bucket = per_source.setdefault(
+            source,
+            {"documents": 0, "last_fetched_at": "", "added_recent": 0},
+        )
+        bucket["documents"] += 1
+        fetched = doc.get("fetched_at") or ""
+        if fetched > bucket["last_fetched_at"]:
+            bucket["last_fetched_at"] = fetched
+
+    recent_runs = _read_recent_runs(run_history_path, limit=14)
+    runs_with_adds = collections.Counter()
+    for run in recent_runs:
+        for source, stats in (run.get("feeds") or {}).items():
+            if stats and (stats.get("added") or 0) > 0:
+                runs_with_adds[source] += 1
+
+    rows = []
+    for source, b in per_source.items():
+        hours = _hours_since(b["last_fetched_at"]) if b["last_fetched_at"] else None
+        rows.append({
+            "source": source,
+            "documents": b["documents"],
+            "last_fetched_at": b["last_fetched_at"] or None,
+            "hours_since_fetched": hours,
+            "recent_runs_with_adds": runs_with_adds.get(source, 0),
+            "recent_runs_total": len(recent_runs),
+        })
+    rows.sort(key=lambda r: (
+        -(r["hours_since_fetched"] or 0),
+        r["source"],
+    ))
+    # Stale = no new doc from this source in the last 14 days AND no run
+    # in the recent history showed an add. Either signal alone could just be
+    # "nothing newsworthy"; both at once means the feed is silently dead.
+    stale = [
+        r for r in rows
+        if (r["hours_since_fetched"] is None
+            or r["hours_since_fetched"] > 14 * 24)
+        and r["recent_runs_with_adds"] == 0
+    ]
+    return {"by_source": rows, "stale": stale}
+
+
+def _signal_coverage(documents, ner_log, kg_store):
+    """How many corpus documents produced *any* recognized signal.
+
+    Off-topic articles and silent extraction failures both look the same in
+    the corpus — a document with no entity hits and no edges contributed.
+    Surfacing the count + a few examples turns those silent failures into a
+    follow-up list. Trafilatura sometimes returns a page's nav-skeleton (no
+    real body) and trafilatura's HTTP layer sometimes gets blocked entirely;
+    both leave the same fingerprint.
+    """
+    no_entities = []
+    short_body = []
+    for doc in documents:
+        chash = doc.get("content_hash")
+        ents = ner_log.entities_for(chash) if chash else []
+        body_len = len(doc.get("raw_text") or "")
+        if not ents:
+            no_entities.append({
+                "source": doc.get("source") or "(unknown)",
+                "title": (doc.get("title") or "")[:80],
+                "url": doc.get("url") or "",
+                "body_chars": body_len,
+            })
+        if body_len < 300 and body_len > 0:
+            short_body.append({
+                "source": doc.get("source") or "(unknown)",
+                "title": (doc.get("title") or "")[:80],
+                "url": doc.get("url") or "",
+                "body_chars": body_len,
+            })
+    return {
+        "documents": len(documents),
+        "no_entities": len(no_entities),
+        "short_body": len(short_body),
+        "examples_no_entities": no_entities[:5],
+        "examples_short_body": short_body[:5],
+    }
+
+
+def _read_recent_runs(run_history_path, limit=14):
+    """Return up to `limit` most recent records from the run-history log."""
+    if not run_history_path:
+        return []
+    path = pathlib.Path(run_history_path)
+    if not path.exists():
+        return []
+    lines = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line:
+                lines.append(line)
+    records = []
+    for line in lines[-limit:]:
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return records
+
+
+def diff_runs(run_history_path):
+    """Compute KPI deltas between the two most recent runs.
+
+    Returns ``None`` if there aren't at least two runs to compare. Otherwise
+    a dict shaped ``{prev, curr, deltas}`` where ``deltas`` maps each tracked
+    KPI to ``{"prev", "curr", "delta", "delta_pct"}``. KPIs absent in either
+    record are skipped (so legacy run-history records gracefully omit, not
+    error). The renderer in `render_diff` highlights deltas > 10%.
+    """
+    runs = _read_recent_runs(run_history_path, limit=2)
+    if len(runs) < 2:
+        return None
+    prev, curr = runs[0], runs[1]
+    tracked = (
+        "documents", "entities", "nodes", "edges", "typed_relations",
+        "singletons", "singleton_pct", "isolated", "isolated_pct",
+        "partial_name_dups", "mentions_per_node",
+        "scrape_seconds", "rebuild_seconds", "added",
+    )
+    deltas = {}
+    for key in tracked:
+        if key in prev and key in curr:
+            p, c = prev[key], curr[key]
+            delta = c - p
+            base = abs(p) if isinstance(p, (int, float)) and p else 0
+            delta_pct = (100.0 * delta / base) if base else None
+            deltas[key] = {
+                "prev": p, "curr": c, "delta": delta, "delta_pct": delta_pct,
+            }
+    return {"prev": prev, "curr": curr, "deltas": deltas}
 
 
 def _reading_stats(documents):
@@ -290,5 +493,127 @@ def render_overview(data):
     for short, full in q["examples"]:
         out.append('        e.g. "%s" may be the same as "%s"' % (short, full))
 
+    dates = data.get("dates")
+    if dates and dates["totals"]["total"]:
+        t = dates["totals"]
+        out += ["", "PUBLISHED-DATE COVERAGE  (silent if dates fail to parse)"]
+        out.append(
+            "  %-24s %10s   (%.1f%% of docs)"
+            % ("Dates parsed", _int(t["parsed"]), t["parsed_pct"])
+        )
+        out.append(
+            "  %-24s %10s   no `published` field on the document"
+            % ("Missing", _int(t["missing"]))
+        )
+        out.append(
+            "  %-24s %10s   present but unrecognised format"
+            % ("Unparseable", _int(t["unparseable"]))
+        )
+        for row in dates["concerning"][:5]:
+            out.append(
+                '        %s: %d unparseable / %d total (%.1f%%)'
+                % (row["source"][:40], row["unparseable"], row["total"],
+                   row["unparseable_pct"])
+            )
+
+    feeds = data.get("feeds")
+    if feeds and feeds["by_source"]:
+        out += ["", "FEED HEALTH  (silently-broken feeds surface here)"]
+        stale = feeds["stale"]
+        if stale:
+            out.append(
+                "  %d feed(s) with no new docs in 14d and no recent adds:"
+                % len(stale)
+            )
+            for row in stale[:10]:
+                if row["hours_since_fetched"] is None:
+                    age = "never"
+                else:
+                    age = _ago(row["hours_since_fetched"])
+                out.append(
+                    "        %-32s last %s, %d total docs"
+                    % (row["source"][:32], age, row["documents"])
+                )
+        else:
+            out.append("  All feeds with corpus presence look active.")
+
+    signals = data.get("signals")
+    if signals and signals["documents"]:
+        out += ["", "EXTRACTION SIGNALS  (off-topic / extraction failures)"]
+        out.append(
+            "  %-24s %10s   docs whose body produced ZERO entities"
+            % ("No-entity docs", _int(signals["no_entities"]))
+        )
+        out.append(
+            "  %-24s %10s   docs with body shorter than 300 chars"
+            % ("Short-body docs", _int(signals["short_body"]))
+        )
+        for ex in signals["examples_no_entities"][:3]:
+            out.append(
+                '        %s | %s'
+                % (ex["source"][:24], ex["title"][:60])
+            )
+
     out.append(bar)
     return "\n".join(out)
+
+
+def render_diff(diff):
+    """Format the run-to-run KPI deltas into a readable diff report.
+
+    `diff` is the dict returned by `diff_runs`. Each KPI is shown with both
+    runs' values and a delta; deltas exceeding +/-10% are marked with `**`
+    so visual scanning surfaces meaningful regressions or improvements.
+    Pure quality KPIs (singletons, isolated, partial dups) are flagged when
+    they *rise*; throughput KPIs (entities, nodes) are flagged either way.
+    """
+    if diff is None:
+        return "No previous run to compare against — only one run in history."
+    bar = "=" * 60
+    out = [bar, "  AI LANDSCAPE - RUN-OVER-RUN DIFF", bar]
+    p_when = (diff["prev"].get("finished_at") or "")[:19].replace("T", " ")
+    c_when = (diff["curr"].get("finished_at") or "")[:19].replace("T", " ")
+    out += ["", "Previous: %s" % (p_when or "?"), "Current:  %s" % (c_when or "?")]
+    out.append("")
+    header = "%-24s %10s %10s %10s %8s" % (
+        "KPI", "previous", "current", "delta", "%"
+    )
+    out.append(header)
+    out.append("-" * len(header))
+    # Order matters for readability — funnel first, then quality, then timing.
+    ordered = [
+        "documents", "entities", "nodes", "edges", "typed_relations",
+        "added",
+        "singletons", "singleton_pct", "isolated", "isolated_pct",
+        "partial_name_dups", "mentions_per_node",
+        "scrape_seconds", "rebuild_seconds",
+    ]
+    for key in ordered:
+        if key not in diff["deltas"]:
+            continue
+        d = diff["deltas"][key]
+        marker = ""
+        if d["delta_pct"] is not None and abs(d["delta_pct"]) >= 10.0:
+            marker = " **"
+        prev_s = _fmt_kpi(d["prev"])
+        curr_s = _fmt_kpi(d["curr"])
+        delta_s = _fmt_kpi(d["delta"])
+        pct_s = (
+            "—" if d["delta_pct"] is None else "%+.1f%%" % d["delta_pct"]
+        )
+        out.append(
+            "%-24s %10s %10s %10s %8s%s"
+            % (key, prev_s, curr_s, delta_s, pct_s, marker)
+        )
+    out.append("")
+    out.append("** = absolute delta >= 10%; investigate.")
+    out.append(bar)
+    return "\n".join(out)
+
+
+def _fmt_kpi(value):
+    if isinstance(value, float):
+        return "%.2f" % value
+    if isinstance(value, int):
+        return _int(value)
+    return str(value)

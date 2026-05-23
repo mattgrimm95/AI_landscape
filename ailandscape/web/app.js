@@ -51,6 +51,13 @@ const RELATION_MEANING = (() => {
 let cy = null;
 let currentParams = {};
 let totalNodes = 0;
+// Set of node ids the spike detector has flagged this session. Used to
+// stamp a small "↑" badge next to entity rows in every list across the
+// app, without weighing down every API response with per-node spike data.
+let SPIKE_IDS = new Set();
+let SPIKE_BY_ID = {};
+// The active briefing window in days — switchable via tabs in the modal.
+let BRIEFING_DAYS = 7;
 // Semantic zoom: as the user zooms past these thresholds we re-fetch the
 // graph with a larger max_nodes so previously-too-small nodes can appear.
 // The thresholds and ladder are chosen so the densification feels like
@@ -109,6 +116,47 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+// Small "↑" badge added to entity rows when the spike detector flagged
+// the node this session. Lifted here so every list renderer in the app
+// (search, dashboard, briefing, sidebar) can opt in by appending the
+// returned string to its row HTML.
+function spikeBadge(nodeId) {
+  if (!nodeId || !SPIKE_IDS.has(Number(nodeId))) return "";
+  const meta = SPIKE_BY_ID[Number(nodeId)];
+  const title = meta
+    ? "Trending: " + meta.recent + " mentions in last 30 days, " +
+      meta.ratio + "× baseline"
+    : "Trending";
+  return ' <span class="spike-badge" title="' + escapeHtml(title) +
+         '">↑</span>';
+}
+
+// localStorage with a graceful no-op fallback so private/incognito modes
+// don't break the UI. Returns null on any failure rather than throwing.
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+}
+function lsAddSeen(key, value) {
+  try {
+    const raw = localStorage.getItem(key) || "";
+    const seen = new Set(raw ? raw.split(",") : []);
+    seen.add(String(value));
+    // Cap to keep the value short on long sessions.
+    const arr = Array.from(seen);
+    if (arr.length > 500) arr.splice(0, arr.length - 500);
+    localStorage.setItem(key, arr.join(","));
+  } catch (e) { /* ignore */ }
+}
+function lsHasSeen(key, value) {
+  try {
+    const raw = localStorage.getItem(key) || "";
+    return raw.split(",").includes(String(value));
+  } catch (e) { return false; }
 }
 
 function setMessage(text) {
@@ -339,8 +387,19 @@ async function selectNode(id) {
   } catch (e) {
     /* leave the source-article list empty */
   }
-  renderDetail(data, docs);
+  let adjacent = { adjacent: [] };
+  try {
+    adjacent = await api("/api/node/" + id + "/adjacent");
+  } catch (e) {
+    /* leave the adjacent-list empty */
+  }
+  renderDetail(data, docs, adjacent);
   highlightNeighborhood(id);
+  // Track the visit so "Surprise me" doesn't keep re-picking the same
+  // entities — running list of every entity the user has focused on.
+  if (data && data.node && data.node.label) {
+    lsAddSeen("ail_seen_entities", data.node.label);
+  }
   // The Selected-entity panel lives at the top of the sidebar; scroll the
   // sidebar to its top so users always see the populated panel after a
   // click. Without this, on tall sidebars a click can silently update an
@@ -489,15 +548,58 @@ function articlesHtml(docs) {
   );
 }
 
-function renderDetail(data, docs) {
+function miniSparklineHtml(timeline) {
+  // A 12-cell sparkline of recent monthly mentions, shown inline in the
+  // detail panel so a single click reveals trend without opening the
+  // full dossier modal. Padded with empty months so a node that ramped
+  // up over only the last quarter still reads as "ramping."
+  if (!timeline || !timeline.length) return "";
+  const cells = timeline.slice(-12);
+  const max = Math.max(1, ...cells.map((c) => c.count));
+  const bars = cells
+    .map(
+      (c) =>
+        '<span class="mini-bar" title="' + escapeHtml(c.month) + ": " +
+        c.count + '" style="height:' +
+        Math.max(3, Math.round((100 * c.count) / max)) + '%"></span>'
+    )
+    .join("");
+  return (
+    '<div class="mini-spark">' + bars + "</div>" +
+    '<div class="mini-spark-note">monthly mentions, last ' + cells.length +
+    " months</div>"
+  );
+}
+
+function adjacentHtml(adjList) {
+  if (!adjList || !adjList.length) return "";
+  return (
+    "<h3>You may not know about</h3>" +
+    '<ul class="adjacent-list">' +
+    adjList
+      .map(
+        (a) =>
+          '<li data-id="' + a.id + '"><span>' + escapeHtml(a.label) +
+          spikeBadge(a.id) + "</span><em>" + a.shared_neighbors +
+          " shared</em></li>"
+      )
+      .join("") +
+    "</ul>"
+  );
+}
+
+function renderDetail(data, docs, adjacent) {
   const n = data.node;
   const color = TYPE_COLORS[n.type] || DEFAULT_COLOR;
   const neighbors = data.neighbors.slice(0, 14);
+  const adjList = (adjacent && adjacent.adjacent) || [];
   $("detail").innerHTML =
-    '<div class="entity-name">' + escapeHtml(n.label) + "</div>" +
+    '<div class="entity-name">' + escapeHtml(n.label) + spikeBadge(n.id) +
+    "</div>" +
     '<div class="entity-meta">' +
     '<span class="badge" style="background:' + color + '">' + escapeHtml(n.type) +
     "</span>" + n.mentions + " mentions · " + n.documents + " documents</div>" +
+    miniSparklineHtml(docs && docs.timeline) +
     attributesHtml(n.attributes) +
     "<h3>Top connections (" + data.neighbors.length + ")</h3>" +
     '<ul class="neighbors">' +
@@ -526,12 +628,19 @@ function renderDetail(data, docs) {
       })
       .join("") +
     "</ul>" +
+    adjacentHtml(adjList) +
     articlesHtml(docs) +
     '<div class="row"><button data-act="focus">Focus here</button>' +
     '<button data-act="dossier" class="ghost">Dossier</button></div>' +
     '<div class="row"><button data-act="ignore" class="ghost">Ignore</button>' +
     '<button data-act="merge" class="ghost">Merge into…</button></div>';
   $("detail-panel").hidden = false;
+  // Adjacent-list rows are clickable to navigate to the suggested entity —
+  // the whole point of the section is "you may not know about this one
+  // either, here's a one-click jump."
+  $("detail").querySelectorAll(".adjacent-list li").forEach((li) =>
+    li.addEventListener("click", () => selectNode(li.dataset.id))
+  );
 
   $("detail").querySelectorAll(".neighbors li").forEach((li) =>
     li.addEventListener("click", () => selectNode(li.dataset.id))
@@ -606,14 +715,17 @@ function barChart(rows) {
 }
 
 function clickList(rows) {
+  // Rows may be 2-tuples [name, meta] or 3-tuples [name, meta, nodeId].
+  // The optional third element lets the renderer stamp a spike badge by
+  // node id without changing existing callers.
   return (
     '<ul class="click-list">' +
     rows
       .map(
         (r) =>
           '<li data-focus="' + escapeHtml(r[0]) + '"><span>' +
-          escapeHtml(r[0]) + "</span><em>" + escapeHtml(String(r[1])) +
-          "</em></li>"
+          escapeHtml(r[0]) + spikeBadge(r[2]) + "</span><em>" +
+          escapeHtml(String(r[1])) + "</em></li>"
       )
       .join("") +
     "</ul>"
@@ -670,6 +782,7 @@ async function showDashboard() {
       ov.top_by_mentions.map((n) => [
         n.canonical_name,
         n.mention_count.toLocaleString() + " mentions",
+        n.id,
       ])
     ) +
     "<h3>Most connected entities</h3>" +
@@ -774,19 +887,40 @@ async function showTrends() {
     setMessage("Trends unavailable: " + e.message);
     return;
   }
+  // The spike list is its own endpoint so trends.build_trends doesn't
+  // need to recompute the per-node date histograms in the common case.
+  let spikes = [];
+  try {
+    const sp = await api("/api/spikes?limit=8");
+    spikes = sp.spikes || [];
+  } catch (e) { /* leave empty */ }
   let html =
     '<h2 class="modal-title">Trends over time</h2>' +
     "<h3>Document volume by month</h3>" +
     (t.document_volume.length
       ? barChart(t.document_volume.map((v) => [v.month, v.count]))
-      : "<p>no dated documents</p>") +
+      : "<p>no dated documents</p>");
+  if (spikes.length) {
+    html += "<h3>Notable spikes</h3>" +
+      '<p class="mini-spark-note">' +
+      "Entities the corpus is suddenly talking about — recent rate at " +
+      "least 3× their long-term baseline.</p>" +
+      clickList(
+        spikes.map((s) => [
+          s.name,
+          s.recent + " recent · " + s.ratio + "× baseline",
+          s.id,
+        ])
+      );
+  }
+  html +=
     "<h3>Newly appeared entities</h3>" +
     clickList(
-      t.new_entities.map((n) => [n.name, "first seen " + n.first_seen])
+      t.new_entities.map((n) => [n.name, "first seen " + n.first_seen, n.id])
     ) +
     "<h3>Most recently active entities</h3>" +
     clickList(
-      t.recent_entities.map((n) => [n.name, "last seen " + n.last_seen])
+      t.recent_entities.map((n) => [n.name, "last seen " + n.last_seen, n.id])
     );
   openModal(html);
   wireFocusClicks();
@@ -923,17 +1057,47 @@ function relLine(e) {
   );
 }
 
-async function showBriefing() {
+async function showBriefing(opts) {
+  opts = opts || {};
+  const days = Number(opts.days || BRIEFING_DAYS || 7);
+  BRIEFING_DAYS = days;
+  const params = new URLSearchParams();
+  params.set("days", String(days));
+  if (opts.subfield) params.set("subfield", opts.subfield);
   let b;
   try {
-    b = await api("/api/briefing");
+    b = await api("/api/briefing?" + params.toString());
   } catch (e) {
     setMessage("Briefing unavailable: " + e.message);
     return;
   }
   const t = b.totals;
+  const subfieldHeader = opts.subfield
+    ? '<div class="dossier-dates">Scoped to: ' +
+      escapeHtml(opts.subfieldLabel || opts.subfield) + " · " +
+      '<a href="#" id="briefing-clear-subfield">show full briefing</a></div>'
+    : "";
+  // Time-sliced tabs let the same modal serve a morning-headline (24h),
+  // weekly catch-up (7d), or vacation-recovery (30d) read.
+  const tabsHtml =
+    '<div class="briefing-tabs">' +
+    [
+      ["24h", 1],
+      ["7d", 7],
+      ["30d", 30],
+    ]
+      .map(
+        (pair) =>
+          '<button class="briefing-tab' +
+          (Number(pair[1]) === days ? " active" : "") +
+          '" data-days="' + pair[1] + '">' + pair[0] + "</button>"
+      )
+      .join("") +
+    "</div>";
   let html =
     '<h2 class="modal-title">Landscape briefing</h2>' +
+    tabsHtml +
+    subfieldHeader +
     '<div class="dossier-dates">' + b.window_days + "-day window · " +
     t.documents + " documents · " + t.entities + " entities · " +
     t.typed_relations + " typed relationships</div>";
@@ -949,9 +1113,13 @@ async function showBriefing() {
   if (b.trending_topics.length) {
     html += "<h3>Trending AI topics</h3>" +
       barChart(b.trending_topics.map((c) => [c.name, c.mentions]));
+  if (b.trending_topics.some((c) => SPIKE_IDS.has(Number(c.id)))) {
+    html += '<p class="mini-spark-note">' +
+      "↑ marks a recent spike vs the entity's long-term rate.</p>";
+  }
   }
   html += "<h3>Most active entities</h3>" +
-    clickList(b.top_entities.map((n) => [n.name, n.mentions + " mentions"]));
+    clickList(b.top_entities.map((n) => [n.name, n.mentions + " mentions", n.id]));
   if (b.contract_awards.length) {
     html += "<h3>Contract awards &amp; deals</h3>" +
       b.contract_awards.map(relLine).join("");
@@ -975,6 +1143,26 @@ async function showBriefing() {
     "</ul>";
   openModal(html);
   wireFocusClicks();
+  // Time-slice tabs (24h / 7d / 30d) reload the briefing in place.
+  $("modal-body").querySelectorAll(".briefing-tab").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const next = Number(btn.dataset.days);
+      if (next && next !== days) {
+        showBriefing({
+          days: next,
+          subfield: opts.subfield,
+          subfieldLabel: opts.subfieldLabel,
+        });
+      }
+    })
+  );
+  const clearSub = $("briefing-clear-subfield");
+  if (clearSub) {
+    clearSub.addEventListener("click", (e) => {
+      e.preventDefault();
+      showBriefing({ days });
+    });
+  }
   $("gen-narrative").addEventListener("click", async () => {
     const btn = $("gen-narrative");
     btn.textContent = "Generating…";
@@ -1056,6 +1244,328 @@ async function findPath() {
   html += "</div>";
   openModal(html);
   wireFocusClicks();
+}
+
+// ---- capabilities modal (AI subfield map) ---------------------------------
+
+async function showCapabilities() {
+  let data;
+  try {
+    data = await api("/api/capabilities");
+  } catch (e) {
+    setMessage("Capabilities unavailable: " + e.message);
+    return;
+  }
+  const subfields = data.subfields || [];
+  let html =
+    '<h2 class="modal-title">AI capabilities map</h2>' +
+    "<p>The eight subfields the corpus organizes around — concepts on " +
+    "the left, the organizations active in each on the right. Pick a card " +
+    "to focus the graph or jump to that subfield's briefing.</p>" +
+    '<div class="cap-cards">';
+  for (const s of subfields) {
+    const concepts = s.concepts || [];
+    const orgs = s.top_organizations || [];
+    html +=
+      '<div class="cap-card" data-subfield="' + escapeHtml(s.id) + '">' +
+      '<div class="cap-card-head">' +
+      '<div class="cap-card-title">' + escapeHtml(s.label) + "</div>" +
+      '<div class="cap-card-tagline">' + escapeHtml(s.tagline) + "</div>" +
+      '<div class="cap-card-meta">' + s.concept_count + " concepts · " +
+      s.mentions + " total mentions · " + s.org_player_count +
+      " orgs active</div>" +
+      "</div>" +
+      '<div class="cap-card-body">' +
+      "<div><h4>Leading concepts</h4>" +
+      (concepts.length
+        ? '<ul class="cap-list">' +
+          concepts
+            .map(
+              (c) =>
+                '<li data-focus="' + escapeHtml(c.name) + '"><span>' +
+                escapeHtml(c.name) + spikeBadge(c.id) + "</span><em>" +
+                c.mentions + "</em></li>"
+            )
+            .join("") +
+          "</ul>"
+        : '<p class="mini-spark-note">No live nodes in this subfield yet.</p>') +
+      "</div>" +
+      "<div><h4>Top organizations</h4>" +
+      (orgs.length
+        ? '<ul class="cap-list">' +
+          orgs
+            .map(
+              (o) =>
+                '<li data-focus="' + escapeHtml(o.name) + '"><span>' +
+                escapeHtml(o.name) + spikeBadge(o.id) + "</span><em>" +
+                o.weight + "</em></li>"
+            )
+            .join("") +
+          "</ul>"
+        : '<p class="mini-spark-note">No org links yet.</p>') +
+      "</div>" +
+      "</div>" +
+      '<div class="cap-card-actions">' +
+      '<button data-cap-brief="' + escapeHtml(s.id) +
+      '" data-cap-label="' + escapeHtml(s.label) +
+      '">What\'s happening here</button>' +
+      '<button class="ghost" data-cap-focus="' + escapeHtml(s.label) +
+      '">Focus graph</button>' +
+      "</div>" +
+      "</div>";
+  }
+  html += "</div>";
+  openModal(html);
+  wireFocusClicks();
+  // "What's happening here" → subfield-scoped briefing (item #7).
+  $("modal-body")
+    .querySelectorAll("[data-cap-brief]")
+    .forEach((btn) =>
+      btn.addEventListener("click", () => {
+        closeModal();
+        showBriefing({
+          days: BRIEFING_DAYS,
+          subfield: btn.dataset.capBrief,
+          subfieldLabel: btn.dataset.capLabel,
+        });
+      })
+    );
+  // "Focus graph" → graph subgraph anchored on the subfield label.
+  // Single-concept focus is simpler than multi-anchor focus and the user
+  // can drill from there using the graph itself.
+  $("modal-body")
+    .querySelectorAll("[data-cap-focus]")
+    .forEach((btn) =>
+      btn.addEventListener("click", () => {
+        closeModal();
+        loadGraph(Object.assign(readFilters(), { focus: btn.dataset.capFocus }));
+      })
+    );
+}
+
+// ---- trajectory modal (corpus over many months) ---------------------------
+
+async function showTrajectory() {
+  let data;
+  try {
+    data = await api("/api/trajectory?months=12");
+  } catch (e) {
+    setMessage("Trajectory unavailable: " + e.message);
+    return;
+  }
+  const months = data.months || [];
+  // Find peak for normalized bar widths.
+  const peak = Math.max(
+    1,
+    ...months.map((m) => Math.max(m.documents, m.new_entities, m.typed_relations))
+  );
+  const rowHtml = (m) => {
+    const mini = (label, value) =>
+      '<div class="td td-mini-bar"><span class="bar-track"><span class="bar-fill" style="width:' +
+      Math.min(100, Math.round((100 * value) / peak)) + '%"></span></span>' +
+      '<span class="val">' + value + "</span></div>";
+    return (
+      '<div class="traj-row">' +
+      '<div class="td month">' + escapeHtml(m.month) + "</div>" +
+      mini("docs", m.documents) +
+      mini("new entities", m.new_entities) +
+      mini("typed rels", m.typed_relations) +
+      "</div>"
+    );
+  };
+  // Most-recent first reads more naturally for a returning user.
+  const ordered = months.slice().reverse();
+  // Collect entity-type totals across the window so the legend is faithful
+  // to what shows up.
+  const typeTotals = {};
+  for (const m of months) {
+    for (const [type, count] of Object.entries(m.entity_type_counts || {})) {
+      typeTotals[type] = (typeTotals[type] || 0) + count;
+    }
+  }
+  const typeChips = Object.entries(typeTotals)
+    .sort((a, b) => b[1] - a[1])
+    .map(
+      ([type, count]) =>
+        '<span class="legend-chip"><span class="dot" style="background:' +
+        (TYPE_COLORS[type] || DEFAULT_COLOR) + '"></span>' +
+        escapeHtml(type) + " — " + count + " new</span>"
+    )
+    .join("");
+  let html =
+    '<h2 class="modal-title">Trajectory</h2>' +
+    '<p>The last 12 months of the landscape at a glance — how much was ' +
+    "happening, what was new, and where stated relationships landed.</p>" +
+    '<div class="traj-table">' +
+    '<div class="th">month</div>' +
+    '<div class="th">documents</div>' +
+    '<div class="th">new entities</div>' +
+    '<div class="th">typed rels</div>' +
+    ordered.map(rowHtml).join("") +
+    "</div>" +
+    (typeChips ? '<div class="traj-types"><h3>New entities by type</h3>' +
+      typeChips + "</div>" : "");
+  openModal(html);
+}
+
+// ---- daily hype read (Claude-powered) --------------------------------------
+
+async function showHype() {
+  openModal(
+    '<h2 class="modal-title">Today\'s spotlight</h2>' +
+    '<p class="mini-spark-note">A 30-second hype read of the most recent ' +
+    "news, generated on demand from the corpus.</p>" +
+    '<div id="hype-box"><p class="muted">Generating…</p></div>'
+  );
+  let r;
+  try {
+    r = await api("/api/hype");
+  } catch (e) {
+    $("hype-box").innerHTML =
+      '<p class="narrative-note">Could not generate: ' +
+      escapeHtml(e.message) + "</p>";
+    return;
+  }
+  if (!r.available) {
+    $("hype-box").innerHTML =
+      '<p class="narrative-note">' + escapeHtml(r.message) + "</p>";
+    return;
+  }
+  if (r.error) {
+    $("hype-box").innerHTML =
+      '<p class="narrative-note">Synthesis failed: ' +
+      escapeHtml(r.error) + "</p>";
+    return;
+  }
+  $("hype-box").innerHTML =
+    '<div class="narrative">' + escapeHtml(r.hype) + "</div>" +
+    '<p class="mini-spark-note">Based on ' + r.documents_used +
+    " recent documents.</p>";
+}
+
+// ---- surprise me (serendipity) ---------------------------------------------
+
+async function surpriseMe() {
+  // Pick a high-mention entity the user hasn't focused on yet. Pull the
+  // overview's top_by_mentions as a pool; filter out anything we've
+  // recorded as seen. Falls through to a random pick when the pool is
+  // exhausted (which is a real "you've seen everything noteworthy" moment).
+  let ov;
+  try { ov = await api("/api/overview"); } catch (e) {
+    setMessage("Couldn't reach the graph: " + e.message);
+    return;
+  }
+  let pool = (ov.top_by_mentions || []).concat(
+    (ov.most_connected || []).map((r) => ({ canonical_name: r[0], type: r[1] }))
+  );
+  // Filter to entities not yet seen.
+  let candidates = pool.filter((n) => !lsHasSeen("ail_seen_entities", n.canonical_name));
+  if (!candidates.length) {
+    candidates = pool;
+    setMessage("Refreshed — every notable entity has been visited at least once.");
+  }
+  const pick = candidates[Math.floor(Math.random() * candidates.length)];
+  if (!pick) {
+    setMessage("Nothing to surprise you with — the graph looks empty.");
+    return;
+  }
+  lsAddSeen("ail_seen_entities", pick.canonical_name);
+  loadGraph(Object.assign(readFilters(), { focus: pick.canonical_name }));
+  setMessage("Surprise: " + pick.canonical_name + " (click for details)");
+}
+
+// ---- pulse strip (always-visible header) -----------------------------------
+
+async function refreshPulse() {
+  let p;
+  try {
+    p = await api("/api/pulse?days=7");
+  } catch (e) { return; }
+  if (!p) return;
+  $("pulse").hidden = false;
+  $("pulse-window").textContent = (p.new_entities_window_days || 7) + "d";
+  $("pulse-new").textContent = Number(p.new_entities || 0).toLocaleString();
+  if (p.top_spike) {
+    $("pulse-spike").textContent = p.top_spike.name;
+    $("pulse-spike-sub").textContent = "↑ " + p.top_spike.ratio + "×";
+  } else {
+    $("pulse-spike").textContent = "—";
+    $("pulse-spike-sub").textContent = "no spikes";
+  }
+  const sbir = Number(p.sbir_total_amount || 0);
+  $("pulse-sbir").textContent = sbir
+    ? "$" + sbir.toLocaleString()
+    : "—";
+  // Card click handlers — each opens the most relevant view.
+  $("pulse").querySelectorAll("[data-pulse]").forEach((card) => {
+    if (card._wired) return;
+    card._wired = true;
+    card.addEventListener("click", () => {
+      const which = card.dataset.pulse;
+      if (which === "recent") showTrends();
+      else if (which === "spike" && p.top_spike) {
+        loadGraph(Object.assign(readFilters(), { focus: p.top_spike.name }));
+      } else if (which === "sbir") showBriefing();
+    });
+  });
+}
+
+async function refreshSpikes() {
+  try {
+    const sp = await api("/api/spikes?limit=20");
+    SPIKE_IDS = new Set((sp.spikes || []).map((s) => Number(s.id)));
+    SPIKE_BY_ID = {};
+    for (const s of (sp.spikes || [])) SPIKE_BY_ID[Number(s.id)] = s;
+  } catch (e) { /* leave defaults */ }
+}
+
+// ---- welcome overlay (first-visit) -----------------------------------------
+
+function showWelcome() {
+  $("welcome").hidden = false;
+}
+function hideWelcome() {
+  $("welcome").hidden = true;
+  lsSet("ail_welcome_seen", "1");
+}
+
+// ---- 3-step tutorial -------------------------------------------------------
+
+const TUTORIAL_STEPS = [
+  "<b>Click any node</b> to see its connections, the evidence behind each " +
+    "relationship, and the source articles.",
+  "<b>Hover an edge</b> to see what the relationship means in plain " +
+    "language. Blue arrows are stated relationships; grey lines are " +
+    "co-occurrence.",
+  "<b>Try a Story tour</b> in the sidebar or <b>Today's briefing</b> in the " +
+    "header for a guided read of what's happening right now.",
+];
+let tutorialStep = 0;
+function startTutorial() {
+  tutorialStep = 0;
+  showTutorialStep();
+}
+function showTutorialStep() {
+  const step = TUTORIAL_STEPS[tutorialStep];
+  if (!step) {
+    endTutorial();
+    return;
+  }
+  $("tutorial").hidden = false;
+  $("tutorial-step").innerHTML =
+    "Step " + (tutorialStep + 1) + " of " + TUTORIAL_STEPS.length +
+    ": " + step;
+  const nextBtn = $("tutorial-next");
+  nextBtn.textContent =
+    tutorialStep === TUTORIAL_STEPS.length - 1 ? "Got it" : "Next";
+}
+function nextTutorialStep() {
+  tutorialStep += 1;
+  showTutorialStep();
+}
+function endTutorial() {
+  $("tutorial").hidden = true;
+  lsSet("ail_seen_tutorial", "1");
 }
 
 // ---- data loading ----------------------------------------------------------
@@ -1460,9 +1970,21 @@ function init() {
   if ($("search-relation")) $("search-relation").addEventListener("change", onSearchInput);
   $("apply").addEventListener("click", () => loadGraph(readFilters()));
   $("open-dashboard").addEventListener("click", showDashboard);
-  $("open-briefing").addEventListener("click", showBriefing);
+  $("open-briefing").addEventListener("click", () => showBriefing());
   $("open-trends").addEventListener("click", showTrends);
   $("open-guide").addEventListener("click", showGuide);
+  if ($("open-capabilities")) {
+    $("open-capabilities").addEventListener("click", showCapabilities);
+  }
+  if ($("open-trajectory")) {
+    $("open-trajectory").addEventListener("click", showTrajectory);
+  }
+  if ($("surprise-me")) {
+    $("surprise-me").addEventListener("click", surpriseMe);
+  }
+  if ($("open-hype")) {
+    $("open-hype").addEventListener("click", showHype);
+  }
   $("find-path").addEventListener("click", findPath);
   const starterGrid = $("starter-grid");
   for (const key of Object.keys(STARTER_VIEWS)) {
@@ -1496,9 +2018,51 @@ function init() {
   });
   $("reset").addEventListener("click", resetView);
   $("topbar-reset").addEventListener("click", resetView);
+  // Welcome overlay buttons (first-visit choice card). Each picks the
+  // path the user committed to — anything from a tour to "just show me
+  // the graph." Dismissed-via-X also closes without a follow-up.
+  if ($("welcome-close")) {
+    $("welcome-close").addEventListener("click", hideWelcome);
+  }
+  if ($("welcome-backdrop")) {
+    $("welcome-backdrop").addEventListener("click", hideWelcome);
+  }
+  document.querySelectorAll(".welcome-choice").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const go = btn.dataset.go;
+      hideWelcome();
+      if (go === "tour") {
+        // Open the first tour, the most accessible introductory thread.
+        const t = (TOURS_CACHE && TOURS_CACHE[0]) || null;
+        if (t) openTour(t.id);
+        else setMessage("Tours still loading — try Story tours in the sidebar.");
+      } else if (go === "capabilities") {
+        showCapabilities();
+      } else if (go === "briefing") {
+        showBriefing();
+      } else if (go === "hype") {
+        showHype();
+      } else if (go === "explore") {
+        // Trigger the 3-step tutorial so a fresh visitor isn't lost on
+        // the bare graph. The tutorial is dismissable.
+        if (!lsGet("ail_seen_tutorial")) startTutorial();
+      }
+    })
+  );
+  // Tutorial controls.
+  if ($("tutorial-next")) {
+    $("tutorial-next").addEventListener("click", nextTutorialStep);
+  }
+  if ($("tutorial-skip")) {
+    $("tutorial-skip").addEventListener("click", endTutorial);
+  }
   wireSliderReadouts();
   refreshTours();
   refreshRecent();
+  // The pulse strip + spike set are global signals every list reads from,
+  // so they're fetched once on init alongside the overview.
+  refreshSpikes();
+  refreshPulse();
   refreshMeta().then(() => {
     // Hydrate from URL hash if present (shareable / bookmarkable views).
     const initial = readUrlState();
@@ -1516,20 +2080,17 @@ function init() {
       loadGraph(Object.assign(readFilters(), state));
     }
   });
-  // First-visit landing: the briefing is the highest-density read-only
-  // surface, so a newcomer sees the synthesis before the graph. The guide
-  // continues to auto-open on a *fresh* first visit (newer flag) so users
-  // who already saw the prior guide don't get it again.
-  try {
-    if (!localStorage.getItem("ail_seen_landing_v2")) {
-      showBriefing();
-      localStorage.setItem("ail_seen_landing_v2", "1");
-    } else if (!localStorage.getItem("ail_seen_guide")) {
-      showGuide();
-      localStorage.setItem("ail_seen_guide", "1");
-    }
-  } catch (e) {
-    /* localStorage unavailable — skip the one-time landing */
+  // First-visit landing: the welcome card offers four on-ramps (tour,
+  // capabilities, briefing, dive into graph) rather than throwing a
+  // briefing wall at a brand-new visitor. Returning visitors who have
+  // already dismissed it don't see it again. The older guide auto-open
+  // is preserved for users who saw the v2 briefing flow but never got
+  // the guide.
+  if (!lsGet("ail_welcome_seen")) {
+    showWelcome();
+  } else if (!lsGet("ail_seen_guide")) {
+    showGuide();
+    lsSet("ail_seen_guide", "1");
   }
 }
 

@@ -16,12 +16,34 @@
     <div id="topbar-right">
       <button id="topbar-reset" class="ghost" title="Reset view (clear filters and focus)">Reset view</button>
       <button id="open-guide" class="ghost">Guide</button>
+      <button id="open-hype" class="ghost" title="A 30-second hype read of today's AI news">Today's spotlight</button>
       <button id="open-briefing" class="ghost">Today's briefing</button>
+      <button id="open-capabilities" class="ghost">Capabilities</button>
       <button id="open-trends" class="ghost">Trends</button>
+      <button id="open-trajectory" class="ghost">Trajectory</button>
       <button id="open-dashboard" class="ghost">Dashboard</button>
+      <button id="surprise-me" class="ghost" title="Show me an entity I haven't looked at yet">Surprise me</button>
       <div id="stats">loading…</div>
     </div>
   </header>
+
+  <div id="pulse" hidden>
+    <div class="pulse-card" data-pulse="recent">
+      <span class="pulse-label">new in <span id="pulse-window">7d</span></span>
+      <span class="pulse-value" id="pulse-new">—</span>
+      <span class="pulse-sub">entities</span>
+    </div>
+    <div class="pulse-card" data-pulse="spike">
+      <span class="pulse-label">trending now</span>
+      <span class="pulse-value" id="pulse-spike">—</span>
+      <span class="pulse-sub" id="pulse-spike-sub"></span>
+    </div>
+    <div class="pulse-card" data-pulse="sbir">
+      <span class="pulse-label">SBIR funding tracked</span>
+      <span class="pulse-value" id="pulse-sbir">—</span>
+      <span class="pulse-sub">total awards</span>
+    </div>
+  </div>
 
   <div id="layout">
     <aside id="sidebar">
@@ -30,109 +52,124 @@
         <div id="detail"></div>
       </section>
 
-      <section class="panel">
-        <h2>Start here</h2>
-        <div id="starter-grid" class="starter-grid"></div>
-      </section>
+      <!-- EXPLORE — entry points & curated paths -->
+      <details class="sidebar-group" id="group-explore" open>
+        <summary><span class="group-title">Explore</span><span class="group-hint">where to start</span></summary>
 
-      <section class="panel" id="tours-panel">
-        <h2>Story tours</h2>
-        <div id="tour-list" class="tour-list">loading…</div>
-      </section>
+        <section class="panel">
+          <h2>Start here</h2>
+          <div id="starter-grid" class="starter-grid"></div>
+        </section>
 
-      <section class="panel" id="recent-panel">
-        <h2>What changed <span id="recent-since" class="muted"></span></h2>
-        <div id="recent">loading…</div>
-      </section>
+        <section class="panel" id="tours-panel">
+          <h2>Story tours</h2>
+          <div id="tour-list" class="tour-list">loading…</div>
+        </section>
 
-      <section class="panel">
-        <h2>Search</h2>
-        <input id="search" type="search" placeholder="Find an entity…"
-               autocomplete="off" />
-        <div class="search-filters">
-          <label>Since
-            <input id="search-since" type="date" />
+        <section class="panel">
+          <h2>Search</h2>
+          <input id="search" type="search" placeholder="Find an entity…"
+                 autocomplete="off" />
+          <div class="search-filters">
+            <label>Since
+              <input id="search-since" type="date" />
+            </label>
+            <label>Relation
+              <select id="search-relation">
+                <option value="">any</option>
+                <option value="leads">leads</option>
+                <option value="part_of">part of</option>
+                <option value="located_in">located in</option>
+                <option value="acquires">acquires</option>
+                <option value="partners_with">partners with</option>
+                <option value="awards_contract">awards contract</option>
+                <option value="develops">develops</option>
+                <option value="supplies">supplies</option>
+              </select>
+            </label>
+          </div>
+          <ul id="search-results"></ul>
+        </section>
+      </details>
+
+      <!-- TRACK — what's moving right now -->
+      <details class="sidebar-group" id="group-track" open>
+        <summary><span class="group-title">Track</span><span class="group-hint">what's moving</span></summary>
+
+        <section class="panel" id="recent-panel">
+          <h2>What changed <span id="recent-since" class="muted"></span></h2>
+          <div id="recent">loading…</div>
+        </section>
+
+        <section class="panel">
+          <h2>Connection</h2>
+          <input id="path-from" type="search" placeholder="From entity…"
+                 autocomplete="off" />
+          <input id="path-to" type="search" placeholder="To entity…"
+                 autocomplete="off" />
+          <button id="find-path">How are they connected?</button>
+        </section>
+
+        <section class="panel" id="overview-panel">
+          <h2>Overview</h2>
+          <div id="overview">loading…</div>
+        </section>
+      </details>
+
+      <!-- TOOLS — filters, legend, less-frequently-used controls -->
+      <details class="sidebar-group" id="group-tools">
+        <summary><span class="group-title">Tools</span><span class="group-hint">filters &amp; legend</span></summary>
+
+        <section class="panel">
+          <h2>View</h2>
+          <label>Entity type
+            <select id="f-type"><option value="">all types</option></select>
           </label>
-          <label>Relation
-            <select id="search-relation">
-              <option value="">any</option>
-              <option value="leads">leads</option>
-              <option value="part_of">part of</option>
-              <option value="located_in">located in</option>
-              <option value="acquires">acquires</option>
-              <option value="partners_with">partners with</option>
-              <option value="awards_contract">awards contract</option>
-              <option value="develops">develops</option>
-              <option value="supplies">supplies</option>
-            </select>
+          <label>Min mentions
+            <input id="f-min-mentions" type="number" value="0" min="0" />
           </label>
-        </div>
-        <ul id="search-results"></ul>
-      </section>
-
-      <section class="panel">
-        <h2>Connection</h2>
-        <input id="path-from" type="search" placeholder="From entity…"
-               autocomplete="off" />
-        <input id="path-to" type="search" placeholder="To entity…"
-               autocomplete="off" />
-        <button id="find-path">How are they connected?</button>
-      </section>
-
-      <section class="panel" id="overview-panel">
-        <h2>Overview</h2>
-        <div id="overview">loading…</div>
-      </section>
-
-      <section class="panel">
-        <h2>View</h2>
-        <label>Entity type
-          <select id="f-type"><option value="">all types</option></select>
-        </label>
-        <label>Min mentions
-          <input id="f-min-mentions" type="number" value="0" min="0" />
-        </label>
-        <label>Min edge weight
-          <input id="f-min-weight" type="number" value="2" min="1" />
-        </label>
-        <label>Max nodes
-          <input id="f-max-nodes" type="number" value="90" min="5" max="400" />
-        </label>
-        <label class="check">
-          <input id="f-relations-only" type="checkbox" />
-          Typed relationships only
-        </label>
-        <label class="slider-row">
-          <span>Min typed-rel confidence</span>
-          <input id="f-min-conf" type="range" min="0" max="100" value="0"
-                 step="5" />
-          <output id="f-min-conf-out">0%</output>
-        </label>
-        <label class="slider-row">
-          <span>Min co-occurrence strength</span>
-          <input id="f-min-strength" type="range" min="0" max="100" value="0"
-                 step="5" />
-          <output id="f-min-strength-out">0.00</output>
-        </label>
-        <details class="pair-filter">
-          <summary>Type-pair filter</summary>
-          <label>From type
-            <select id="f-src-type"><option value="">any source type</option></select>
+          <label>Min edge weight
+            <input id="f-min-weight" type="number" value="2" min="1" />
           </label>
-          <label>To type
-            <select id="f-dst-type"><option value="">any target type</option></select>
+          <label>Max nodes
+            <input id="f-max-nodes" type="number" value="90" min="5" max="400" />
           </label>
-        </details>
-        <div class="row">
-          <button id="apply">Apply</button>
-          <button id="reset" class="ghost">Reset</button>
-        </div>
-      </section>
+          <label class="check">
+            <input id="f-relations-only" type="checkbox" />
+            Typed relationships only
+          </label>
+          <label class="slider-row">
+            <span>Min typed-rel confidence</span>
+            <input id="f-min-conf" type="range" min="0" max="100" value="0"
+                   step="5" />
+            <output id="f-min-conf-out">0%</output>
+          </label>
+          <label class="slider-row">
+            <span>Min co-occurrence strength</span>
+            <input id="f-min-strength" type="range" min="0" max="100" value="0"
+                   step="5" />
+            <output id="f-min-strength-out">0.00</output>
+          </label>
+          <details class="pair-filter">
+            <summary>Type-pair filter</summary>
+            <label>From type
+              <select id="f-src-type"><option value="">any source type</option></select>
+            </label>
+            <label>To type
+              <select id="f-dst-type"><option value="">any target type</option></select>
+            </label>
+          </details>
+          <div class="row">
+            <button id="apply">Apply</button>
+            <button id="reset" class="ghost">Reset</button>
+          </div>
+        </section>
 
-      <section class="panel">
-        <h2>Legend</h2>
-        <ul id="legend"></ul>
-      </section>
+        <section class="panel">
+          <h2>Legend</h2>
+          <ul id="legend"></ul>
+        </section>
+      </details>
     </aside>
 
     <main id="main">
@@ -159,6 +196,49 @@
       <div id="article-body"></div>
     </div>
   </aside>
+
+  <div id="welcome" hidden>
+    <div id="welcome-backdrop"></div>
+    <div id="welcome-card">
+      <button id="welcome-close" class="ghost" aria-label="Skip welcome">&times;</button>
+      <h2>Welcome to the AI Landscape</h2>
+      <p>A knowledge graph of who's doing what in defense AI — built from
+         news, SBIR/STTR awards, and DoD budget books.</p>
+      <p class="welcome-q">How would you like to start?</p>
+      <div id="welcome-choices">
+        <button class="welcome-choice" data-go="hype">
+          <span class="wc-title">Hype me up about AI ⚡</span>
+          <span class="wc-sub">A 30-second exciting read of the very latest news.</span>
+        </button>
+        <button class="welcome-choice" data-go="tour">
+          <span class="wc-title">Take a 60-second tour</span>
+          <span class="wc-sub">A guided thread through one corner of the landscape.</span>
+        </button>
+        <button class="welcome-choice" data-go="capabilities">
+          <span class="wc-title">Browse AI capabilities</span>
+          <span class="wc-sub">Foundation models, RL, autonomy, ISR — each with the orgs working on it.</span>
+        </button>
+        <button class="welcome-choice" data-go="briefing">
+          <span class="wc-title">Read today's briefing</span>
+          <span class="wc-sub">What's hot this week: top entities, deals, trending topics.</span>
+        </button>
+        <button class="welcome-choice" data-go="explore">
+          <span class="wc-title">Just show me the graph</span>
+          <span class="wc-sub">Dive in — click any node to start exploring.</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tutorial" hidden>
+    <div id="tutorial-bubble">
+      <div id="tutorial-step"></div>
+      <div class="tutorial-actions">
+        <button id="tutorial-skip" class="ghost">Skip</button>
+        <button id="tutorial-next">Next</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

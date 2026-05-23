@@ -401,3 +401,176 @@ A high-level record of steps taken and decisions made while implementing the
   corpus yet; the integration degrades gracefully and will populate on the
   next `run` / `sbir` once the endpoint is reachable. Verified end-to-end
   against the fixture in the meantime.
+
+## 2026-05-23 — Data-quality pipeline improvements (10-item batch)
+
+A coordinated set of changes targeting observability, drift detection, and
+curator-loop velocity. What landed and why:
+
+### Observability
+- **Per-feed health scorecards** in `pipeline.scrape_into_corpus` (and the
+  SBIR / J-Books variants): each scrape now records `{fetched, added,
+  extracted, error}` per source name. The data lands in `run_history.jsonl`
+  on every full `run` and is consumed by `report._feed_health`, which
+  surfaces feeds that produced no new docs in 14 days and contributed no
+  adds in recent runs — "silently broken" feeds that were invisible before.
+- **Quality KPIs on each run record** (`pipeline._quality_kpis_after_rebuild`):
+  singletons, isolated nodes, partial-name duplicates, mentions-per-node,
+  typed-relation count. These ride on `run_history.jsonl` and feed a new
+  `overview --diff` view (`report.diff_runs` / `render_diff`) that shows
+  run-over-run deltas with a `**` marker on changes >= 10%.
+- **Date-parse coverage** (`corpus.published_date_status`): distinguishes
+  `missing` from `unparseable`. The overview now lists per-source rates so
+  a feed shipping a date format the pipeline can't read no longer silently
+  flattens to `fetched_at`.
+- **Extraction-signal coverage** (`report._signal_coverage`): docs whose
+  body produced zero entities, and docs with body < 300 chars, get counted
+  and surfaced — fingerprints of silent scrape failure or off-topic content.
+
+### Curator loop
+- **Gazetteer-candidate auto-surface** (`review._gazetteer_candidates`):
+  high-frequency multi-word `misc` nodes (docs >= 3, mentions >= 5) not in
+  the gazetteer land in `review.json` under `gazetteer_candidates`. Closes
+  the loop from "find a missing entity by hand" to "review the curator
+  shortlist".
+- **Bulk-apply from review.json** (`ailandscape correct-from-review`): walks
+  the accumulating store and prompts y/n for each partial-name merge,
+  structural-noise ignore, and acronym mapping, then writes a single batched
+  update to `corrections.json` and rebuilds. `--yes` skips prompts for
+  trusted bulk runs.
+- **Apposition-based acronym coreference** (`ailandscape/acronyms.py`): the
+  long-deferred TODO. Mines `<Expansion> (<ACRONYM>)` / `<ACRONYM>
+  (<Expansion>)` appositions and verifies the acronym is the initials
+  sequence of the expansion — trying every include/skip combination on
+  connector words ("of"/"the"/"and"), since "DOD" includes the connector
+  initial while "DARPA" skips it. Greedy regex captures are refined to the
+  shortest matching span. Pairs are gated by `MIN_DOC_FREQ = 2`; survivors
+  land in `review.json` for human approval — never auto-merged. First live
+  run on the corpus surfaced 32 corroborated mappings (EECS, CSAIL, CCA,
+  ISR, IRGC, UAE, NLP, LLM, AFSOC, HELIOS, ...).
+
+### Reconcile / NER hardening
+- **Email-key person merging** (`reconcile._coreference_by_email`): two
+  person nodes carrying the same `attributes.email` (extracted by
+  `_split_attributes` from academic-blog contact blocks) fold into one
+  node. Shared role inboxes (`info@`, `press@`, ...) are excluded.
+- **NER chain hygiene** (`ner.py`): the proper-noun extractor now breaks
+  the chain at a token ending in `.`/`?`/`!` (sentence terminator),
+  requires continuation tokens to be 2+ characters (rejects "for X" bridges
+  in math-heavy text), rejects multi-word ALL-CAPS phrases as headers
+  ("BREAKING NEWS"), and adds common imperative verbs ("Use", "Call",
+  "Let", ...) to `_STOPWORDS`. Reconcile also rejects entity surfaces
+  containing math/code operators (`=`, `<>`, `{}`, `[]`, `/`) before
+  `normalize()` strips them and the signal is lost.
+
+### Test rigor
+- **Golden-snapshot regression guard** (`tests/test_golden_snapshot.py`):
+  the bundled 4-article sample feed rebuilds to a fixed 17 nodes / 44 edges
+  / 37 NER entities. Any silent heuristic change that drops a real entity
+  or invents new merges trips this test.
+- **NER adversarial battery** (`tests/test_ner_adversarial.py`): code
+  blocks, URL slugs, CSS class names, math notation, emoji runs, ALL-CAPS
+  headers, mixed-language prose, URLs/emails in text, and extreme-length
+  phrases all assert "no graph node survives." These caught and drove the
+  NER hygiene fixes above.
+- 50 new tests total; 220 pass (3 skipped — spaCy-dependent), up from a
+  170-test baseline.
+
+## 2026-05-23 — Knowledge-graph & GUI UX improvements (14-item batch)
+
+A coordinated set of frontend + supporting backend changes so a new
+visitor can rapidly start learning about the AI national-security
+landscape, an AI expert can find topics they know are big, and a
+returning visitor can see what's moved over many months. Applied the
+"simple and clean as features are added" principle throughout: the
+sidebar was reorganized into three collapsible groups (EXPLORE / TRACK
+/ TOOLS) so adding new panels didn't compound vertical clutter.
+
+### Onboarding
+- **Welcome overlay** (first visit): replaces the briefing auto-open
+  with a small choice card — *Hype me up about AI / 60-second tour /
+  Browse AI capabilities / Read today's briefing / Just show me the
+  graph*. Dismissed-once via `ail_welcome_seen`. Skipping straight to
+  "explore" triggers the 3-step tutorial bubble.
+- **3-step tutorial**: a small bubble that walks a fresh visitor through
+  click-a-node → hover-an-edge → try-a-tour. Dismissable.
+
+### Discovery
+- **Adjacent territory** in the detail panel: a "You may not know
+  about" list of entities two hops away (powered by
+  `/api/node/{id}/adjacent`), ranked by shared intermediate neighbors.
+- **"Surprise me" topbar button**: picks a high-mention entity the user
+  hasn't focused on this session (tracked in `ail_seen_entities`
+  localStorage), focuses the graph + opens the dossier.
+- **Spike detection** (`trends.build_spikes`): entities whose recent
+  30d mention rate is ≥3× their long-term baseline with ≥5 recent
+  mentions, scoped to typed entities (excludes `misc` to keep noise
+  out) and requiring ≥60 days of active span (so newly-appeared nodes
+  go through the existing "newly appeared" channel, not here). Surfaced
+  via `/api/spikes`; the frontend stamps a small "↑" badge on every
+  matching entity row site-wide.
+
+### Topic finding for AI experts
+- **Capability taxonomy** (`gazetteer.SUBFIELDS`): 8 hand-curated
+  subfields (Foundation models, Machine learning, Perception, Autonomy,
+  ISR & C2, Cyber & EW, Directed energy, Defense AI programs) mapping
+  concept entities to the subfields a defense / AI reader thinks in.
+  No overlap (asserted by test). New concepts in the gazetteer get
+  picked up by adding them to a subfield list.
+- **Capabilities modal**: one card per subfield with the leading concept
+  nodes on the left, top organizations (ranked by total co-occurrence
+  weight with subfield concepts) on the right, plus *What's happening
+  here* and *Focus graph* actions per card. Backed by
+  `/api/capabilities` and the new `capabilities.build_capabilities`.
+- **Subfield-scoped briefing**: `briefing.build_briefing` accepts a
+  `subfield_concepts` arg; the new `subfield` query param on
+  `/api/briefing` scopes entities + docs + relations to one capability
+  area without code duplication.
+
+### Recent advancements
+- **Pulse strip** in the header: always-visible row of three cards —
+  new entities in the last 7 days, top trending spike, total tracked
+  SBIR funding. Each card click opens the most relevant view.
+- **Time-sliced briefing tabs** (24h / 7d / 30d): a tab bar at the top
+  of the briefing modal switches the recency window in place.
+
+### Strategic / longitudinal
+- **Trajectory modal**: 12 months of corpus activity at a glance —
+  documents, new entities, typed relations per month with a stacked-bar
+  visualization, plus a legend of new entities by type. Backed by
+  `/api/trajectory` and the new `trends.build_trajectory`.
+- **Inline mini-sparkline** in the sidebar detail panel: 12-cell
+  monthly bar chart shown immediately on node click (no need to open
+  the full dossier modal for the trend signal).
+
+### "Today's spotlight" (Claude-powered hype read)
+- A 30-second exciting read of the most recent day's news. New
+  `synthesis.summarize_hype` builds an upbeat journalist-style prompt
+  from the last-24h documents (with a 3-day soft fallback for quiet
+  windows) and SBIR funding totals; `/api/hype` returns
+  `available=False` without an `ANTHROPIC_API_KEY` so the topbar
+  button and welcome card always show the feature without ever
+  attempting the call. Exposed via a `Today's spotlight` topbar
+  button and the *Hype me up about AI ⚡* welcome card option.
+
+### Sidebar reorganization
+- Three labelled `<details>` groups: **EXPLORE** (Start here, Story
+  tours, Search), **TRACK** (What changed, Connection, Overview),
+  **TOOLS** (View filters, Legend). Each collapsible. Reduces the
+  vertical-scroll burden the original 9-panel stack imposed on a
+  first-time visitor.
+
+### Test rigor
+- `tests/test_capabilities.py` covers the subfield index + the
+  no-overlap invariant on the curated taxonomy.
+- `tests/test_trends.py` adds spike-detection cases (long-lived surge,
+  brand-new entity, misc exclusion, min-recent floor) and trajectory
+  bucketing.
+- `tests/test_briefing.py` adds a subfield-scoping case.
+- `tests/test_synthesis.py` adds hype cases (no-key error, prompt
+  carries headlines + SBIR total, quiet-day fallback).
+- `tests/test_server.py` adds endpoint coverage for capabilities,
+  trajectory, spikes, pulse, adjacent, hype, and briefing-with-subfield.
+- 245 tests pass (3 skipped — spaCy-dependent); up from 220.
+
+
