@@ -48,6 +48,13 @@ HTTP_TIMEOUT = 20
 # "hybrid" degrades to "rule" automatically if spaCy is not installed.
 DEFAULT_NER_BACKEND = "hybrid"
 
+# spaCy model preference for the hybrid + spacy backends. The list is tried
+# in order until one loads, so opting into a larger model is as simple as
+# making sure it's installed — and a missing optional model never breaks the
+# pipeline. The default order prefers a larger model (higher recall) while
+# falling back to the small one that ships with the project's docs.
+SPACY_MODELS = ("en_core_web_md", "en_core_web_sm")
+
 
 def ensure_dirs():
     """Create the data, snapshot, and corpus directories if they are missing."""

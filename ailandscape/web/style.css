@@ -350,3 +350,256 @@ ul.guide-list b { color: var(--text); }
 .rel-line { font-size: 12px; padding: 3px 6px; border-radius: 5px; cursor: pointer; }
 .rel-line:hover { background: var(--panel-2); }
 .rel-line .rel { color: #a8c8ff; }
+
+/* ---- entity momentum + Claude-read badges ---- */
+.momentum {
+  margin: 6px 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.read-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  vertical-align: middle;
+  margin-left: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.read-badge.fresh   { background: rgba(95, 165, 90, 0.22);  color: #b1dca7; }
+.read-badge.stale   { background: rgba(224, 138, 60, 0.22); color: #f0bb86; }
+.read-badge.unread  { background: rgba(155, 109, 199, 0.22); color: #d4b8ee; }
+
+/* ---- view-panel slider rows + type-pair filter ---- */
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.slider-row span { grid-column: 1 / span 2; color: var(--muted); }
+.slider-row input[type="range"] { width: 100%; }
+.slider-row output {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-size: 12px;
+  min-width: 36px;
+  text-align: right;
+}
+details.pair-filter {
+  margin: 6px 0 4px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+details.pair-filter summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+details.pair-filter[open] summary { color: var(--text); }
+details.pair-filter label { font-size: 12px; }
+
+/* ---- what-changed sidebar ---- */
+#recent-panel .muted { color: var(--muted); font-weight: 400; font-size: 12px; }
+.recent-section { margin-bottom: 10px; }
+.recent-head {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.click-list.compact li,
+.articles.compact li { font-size: 12px; padding: 3px 6px; }
+
+.search-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+.search-filters label { font-size: 12px; }
+.search-filters input[type="date"], .search-filters select {
+  width: 100%;
+}
+
+/* ---- in-app article drawer ---- */
+#article-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(560px, 100vw);
+  z-index: 60;
+  display: flex;
+}
+#article-drawer-card {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+}
+#article-drawer-card header {
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+#article-close {
+  position: absolute;
+  top: 8px; right: 10px;
+  font-size: 22px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.article-title { margin: 0 28px 6px 0; font-size: 16px; line-height: 1.3; }
+.article-src { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.article-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.article-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.article-link:hover { text-decoration: underline; }
+#article-body {
+  padding: 12px 18px 28px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+}
+#article-body p { margin-bottom: 14px; }
+.article-open { cursor: pointer; }
+
+/* ---- story tours ---- */
+.tour-list { display: flex; flex-direction: column; gap: 6px; }
+.tour-card {
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  font-size: 13px;
+}
+.tour-card:hover { border-color: var(--accent); }
+.tour-title { font-weight: 600; }
+.tour-tagline { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.tour-tagline-modal {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.tour-stops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tour-stops li {
+  border-left: 2px solid var(--accent);
+  padding: 0 0 0 12px;
+}
+.tour-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.tour-num {
+  background: var(--accent);
+  color: #11151c;
+  font-weight: 700;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+}
+.tour-entity {
+  font-weight: 600;
+  text-decoration: underline dotted;
+}
+.tour-step-head:hover .tour-entity { color: var(--accent); }
+.tour-card-body {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---- mobile: reading-first surfaces reflow on narrow screens ----
+ *
+ * The graph itself stays desktop-only (Cytoscape is heavy and pinch-zoom
+ * conflicts with the layout we already use), but the briefing, dashboard,
+ * trends, dossier, tour, and article-drawer modals are exactly the surfaces
+ * that *should* work on a phone — that's where someone learns the landscape
+ * in 10 minutes on the train.
+ */
+@media (max-width: 760px) {
+  #topbar { padding: 8px 12px; gap: 8px; }
+  #topbar h1 { font-size: 14px; }
+  #topbar h1 span { display: none; }
+  #topbar-right { gap: 6px; flex-wrap: wrap; }
+  #topbar-right button { padding: 6px 8px; font-size: 12px; }
+  #stats { display: none; }
+
+  /* Stack sidebar + graph; the graph is still rendered but the user lands
+     on the briefing modal first, which is the primary reading flow. */
+  #layout { flex-direction: column; height: auto; }
+  #sidebar {
+    width: 100%;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  #cy { height: 60vh; }
+
+  /* Larger touch targets in any button-or-list-row interaction. */
+  .panel button,
+  .starter-grid button,
+  .tour-card,
+  .neighbors li,
+  .articles li {
+    min-height: 36px;
+  }
+
+  /* Modals: full-bleed on phones. The 92vw cap looks awkward against
+     edge-to-edge content; on tiny screens claim the whole viewport. */
+  #modal-card {
+    top: 0; left: 0;
+    transform: none;
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 16px 14px 24px;
+  }
+  #modal-body h2.modal-title { font-size: 16px; }
+
+  /* Article drawer: full-screen instead of side-panel. */
+  #article-drawer { width: 100vw; }
+  #article-drawer-card { border-left: none; }
+
+  /* Tighter info chips so headers don't wrap awkwardly. */
+  .dash-grid { grid-template-columns: 1fr 1fr; }
+  .search-filters { grid-template-columns: 1fr; }
+}

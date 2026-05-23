@@ -60,6 +60,29 @@ class NerTest(unittest.TestCase):
         self.assertEqual(len(people), 1)
         self.assertEqual(people[0]["label"], "person")
 
+    def test_chained_person_titles_are_stripped(self):
+        # "Lt. Col. Jason Kruck" was capturing as a single misc phrase because
+        # only ONE leading title was being stripped. With the chained-title
+        # strip we recover "Jason Kruck" as a person.
+        entities = ner.extract(
+            "Lt. Col. Jason Kruck commanded the squadron.", backend="rule"
+        )
+        people = [e for e in entities if e["text"] == "Jason Kruck"]
+        self.assertEqual(len(people), 1)
+        self.assertEqual(people[0]["label"], "person")
+
+    def test_multi_connector_phrases_are_kept_together(self):
+        # Phrases that bridge two lowercase connectors ("of the") used to be
+        # split — "Department of the Treasury" came out as just "Department"
+        # and "Treasury". The connector look-ahead joins them back.
+        found = texts(
+            ner.extract(
+                "Officials at the Department of the Treasury met today.",
+                backend="rule",
+            )
+        )
+        self.assertIn("Department of the Treasury", found)
+
     def test_offsets_point_at_surface_text(self):
         text = "China expanded its program."
         china = [

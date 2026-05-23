@@ -15,7 +15,7 @@
     <h1>AI Landscape <span>National-Security Knowledge Graph</span></h1>
     <div id="topbar-right">
       <button id="open-guide" class="ghost">Guide</button>
-      <button id="open-briefing" class="ghost">Briefing</button>
+      <button id="open-briefing" class="ghost">Today's briefing</button>
       <button id="open-trends" class="ghost">Trends</button>
       <button id="open-dashboard" class="ghost">Dashboard</button>
       <div id="stats">loading…</div>
@@ -29,10 +29,38 @@
         <div id="starter-grid" class="starter-grid"></div>
       </section>
 
+      <section class="panel" id="tours-panel">
+        <h2>Story tours</h2>
+        <div id="tour-list" class="tour-list">loading…</div>
+      </section>
+
+      <section class="panel" id="recent-panel">
+        <h2>What changed <span id="recent-since" class="muted"></span></h2>
+        <div id="recent">loading…</div>
+      </section>
+
       <section class="panel">
         <h2>Search</h2>
         <input id="search" type="search" placeholder="Find an entity…"
                autocomplete="off" />
+        <div class="search-filters">
+          <label>Since
+            <input id="search-since" type="date" />
+          </label>
+          <label>Relation
+            <select id="search-relation">
+              <option value="">any</option>
+              <option value="leads">leads</option>
+              <option value="part_of">part of</option>
+              <option value="located_in">located in</option>
+              <option value="acquires">acquires</option>
+              <option value="partners_with">partners with</option>
+              <option value="awards_contract">awards contract</option>
+              <option value="develops">develops</option>
+              <option value="supplies">supplies</option>
+            </select>
+          </label>
+        </div>
         <ul id="search-results"></ul>
       </section>
 
@@ -68,6 +96,27 @@
           <input id="f-relations-only" type="checkbox" />
           Typed relationships only
         </label>
+        <label class="slider-row">
+          <span>Min typed-rel confidence</span>
+          <input id="f-min-conf" type="range" min="0" max="100" value="0"
+                 step="5" />
+          <output id="f-min-conf-out">0%</output>
+        </label>
+        <label class="slider-row">
+          <span>Min co-occurrence strength</span>
+          <input id="f-min-strength" type="range" min="0" max="100" value="0"
+                 step="5" />
+          <output id="f-min-strength-out">0.00</output>
+        </label>
+        <details class="pair-filter">
+          <summary>Type-pair filter</summary>
+          <label>From type
+            <select id="f-src-type"><option value="">any source type</option></select>
+          </label>
+          <label>To type
+            <select id="f-dst-type"><option value="">any target type</option></select>
+          </label>
+        </details>
         <div class="row">
           <button id="apply">Apply</button>
           <button id="reset" class="ghost">Reset</button>
@@ -99,6 +148,16 @@
       <div id="modal-body"></div>
     </div>
   </div>
+
+  <aside id="article-drawer" hidden>
+    <div id="article-drawer-card">
+      <header>
+        <button id="article-close" class="ghost" aria-label="Close">&times;</button>
+        <div id="article-meta"></div>
+      </header>
+      <div id="article-body"></div>
+    </div>
+  </aside>
 
   <script src="app.js"></script>
 </body>

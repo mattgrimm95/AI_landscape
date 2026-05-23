@@ -35,6 +35,19 @@ const RELATION_GLOSSARY = [
   ["co-occurrence", "entities mentioned together — not a stated relationship"],
 ];
 
+// Quick lookup keyed by both the "leads" / "awards contract" surface and the
+// underscore form ("awards_contract") the API returns. Used for edge hover
+// tooltips and the search filter dropdown.
+const RELATION_MEANING = (() => {
+  const out = {};
+  for (const [label, meaning] of RELATION_GLOSSARY) {
+    out[label] = meaning;
+    out[label.replace(/\s+/g, "_")] = meaning;
+  }
+  out.co_occurs_with = out["co-occurrence"];
+  return out;
+})();
+
 let cy = null;
 let currentParams = {};
 let totalNodes = 0;
@@ -226,6 +239,17 @@ function renderGraph(graph) {
     const ev = evt.target.data("evidence");
     if (ev) setMessage("“" + ev + "”");
   });
+  // Hover an edge to see what its relation means, in plain language. This
+  // lifts the glossary out of the Guide modal so a learner discovers it
+  // mid-exploration without a context switch.
+  cy.on("mouseover", "edge", (evt) => {
+    const relation = evt.target.data("relation") || "co_occurs_with";
+    const meaning = RELATION_MEANING[relation];
+    if (meaning) {
+      const label = relation.replace(/_/g, " ");
+      setMessage(label + " — " + meaning);
+    }
+  });
   cy.on("tap", (evt) => {
     if (evt.target === cy) clearSelection();
   });
@@ -266,6 +290,22 @@ async function selectNode(id) {
   highlightNeighborhood(id);
 }
 
+function momentumHtml(m) {
+  if (!m) return "";
+  const color = {
+    rising: "#5fa55a",
+    steady: "#9b6dc7",
+    cooling: "#e08a3c",
+  }[m.label] || "#7c8593";
+  const recent = Number(m.recent_30d || 0);
+  const prior = Number(m.prior_30d || 0);
+  return (
+    '<div class="momentum"><span class="badge" style="background:' +
+    color + '">' + escapeHtml(m.label) + "</span> " + recent +
+    " mentions in last 30 days · " + prior + " in the 30 days before</div>"
+  );
+}
+
 function attributesHtml(attrs) {
   attrs = attrs || {};
   const keys = Object.keys(attrs);
@@ -298,6 +338,68 @@ function attributesHtml(attrs) {
   );
 }
 
+function readBadge(a) {
+  const reads = Number(a.claude_read_count || 0);
+  if (!reads) return '<span class="read-badge unread">unread</span>';
+  const cls = a.claude_read_fresh ? "fresh" : "stale";
+  return (
+    '<span class="read-badge ' + cls + '">' + reads + "× · " +
+    (a.claude_read_fresh ? "fresh" : "stale") + "</span>"
+  );
+}
+
+// ---- in-app article reader -------------------------------------------------
+
+async function openArticle(contentHash) {
+  if (!contentHash) return;
+  $("article-drawer").hidden = false;
+  $("article-body").innerHTML = '<p class="muted">Loading…</p>';
+  let doc;
+  try {
+    doc = await api("/api/document/" + encodeURIComponent(contentHash));
+  } catch (e) {
+    $("article-body").innerHTML =
+      '<p class="muted">Article not available.</p>';
+    return;
+  }
+  $("article-meta").innerHTML =
+    '<h2 class="article-title">' + escapeHtml(doc.title || "(no title)") + "</h2>" +
+    '<div class="article-src">' + escapeHtml(doc.source || "") +
+    (doc.published ? " · " + escapeHtml(doc.published) : "") + "</div>" +
+    '<div class="article-actions">' +
+    '<a class="article-link" href="' + encodeURI(doc.url) +
+    '" target="_blank" rel="noopener noreferrer">View original ↗</a>' +
+    ' <button id="article-mark-read" class="ghost">Mark as Claude-read</button>' +
+    " " + readBadge(doc) + "</div>";
+  $("article-body").innerHTML = paragraphify(doc.raw_text || "(no text)");
+  $("article-mark-read").addEventListener("click", async () => {
+    try {
+      await api("/api/document/mark-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content_hash: doc.content_hash }),
+      });
+      setMessage("Marked as Claude-read.");
+      // Re-render the article so the badge reflects the new state.
+      openArticle(doc.content_hash);
+    } catch (e) {
+      setMessage("Mark-read failed: " + e.message);
+    }
+  });
+}
+
+function paragraphify(text) {
+  return text
+    .split(/\n\n+/)
+    .map((p) => "<p>" + escapeHtml(p.trim()) + "</p>")
+    .join("");
+}
+
+function closeArticle() {
+  $("article-drawer").hidden = true;
+  $("article-body").innerHTML = "";
+}
+
 function articlesHtml(docs) {
   const list = (docs && docs.documents) || [];
   if (!list.length) return "";
@@ -309,11 +411,14 @@ function articlesHtml(docs) {
       .slice(0, 10)
       .map(
         (a) =>
-          '<li><a href="' + encodeURI(a.url) +
-          '" target="_blank" rel="noopener noreferrer">' +
-          escapeHtml(a.title || a.url) + "</a>" +
+          '<li><a class="article-open" href="#read-' +
+          encodeURIComponent(a.content_hash || "") +
+          '" data-hash="' + escapeHtml(a.content_hash || "") + '">' +
+          escapeHtml(a.title || a.url) + "</a> " + readBadge(a) +
           '<div class="src">' + escapeHtml(a.source || "") +
           (a.published ? " · " + escapeHtml(a.published) : "") +
+          " · <a href=\"" + encodeURI(a.url) +
+          '" target="_blank" rel="noopener noreferrer">original ↗</a>' +
           "</div></li>"
       )
       .join("") +
@@ -514,6 +619,16 @@ async function showDashboard() {
     line("Single-mention nodes", Math.round(q.singleton_pct) + "% of nodes") +
     line("Isolated nodes", Math.round(q.isolated_pct) + "% of nodes") +
     line("Partial-name duplicates", q.partial_name_dups);
+  if (ov.reading) {
+    const r = ov.reading;
+    html +=
+      "<h3>Claude reading coverage</h3>" +
+      line("Fresh (read since last corpus update)",
+           r.fresh + " of " + r.documents +
+           " (" + Math.round(r.fresh_pct) + "%)") +
+      line("Stale (read, but corpus has since changed)", r.stale) +
+      line("Never read", r.never_read);
+  }
   openModal(html);
   wireFocusClicks();
 }
@@ -546,6 +661,7 @@ async function showDossier(id) {
       escapeHtml((n.first_seen || "?").slice(0, 10)) + " – " +
       escapeHtml((n.last_seen || "?").slice(0, 10)) + "</div>";
   }
+  html += momentumHtml(docs.momentum);
   html += attributesHtml(n.attributes);
   if (typed.length) {
     html +=
@@ -634,14 +750,39 @@ function showGuide() {
     "SBIR/STTR awards. Each node is an entity; blue arrows are typed " +
     "relationships read from the source text, grey lines are " +
     "co-occurrence.</p>" +
+    "<h3>What lives where</h3>" +
+    '<ul class="guide-list">' +
+    "<li><b>Corpus</b> — the raw articles themselves, one JSON line per " +
+    "article (title, body, source, published date). The version-controlled " +
+    "source of truth that everything else is derived from. Tap an article " +
+    "title anywhere in the app to read it in a side drawer.</li>" +
+    "<li><b>Knowledge graph</b> — entities (people, orgs, products, " +
+    "places, concepts) and the relationships between them, extracted from " +
+    "the corpus. The web of nodes you see in the middle.</li>" +
+    "<li><b>Dossier</b> — a one-page profile of a single entity, opened " +
+    "from a node or any entity link. It pulls together that entity's " +
+    "typed relationships (with the evidence sentence behind each one), " +
+    "the entities it co-occurs with, an activity timeline, a rising/" +
+    "steady/cooling momentum badge, and the source articles it appears " +
+    "in. The dossier is a <em>view</em> over the corpus + graph for one " +
+    "entity; the corpus is the substrate underneath every dossier.</li>" +
+    "</ul>" +
     "<h3>How to explore</h3>" +
     '<ul class="guide-list">' +
     "<li>Click any node for its connections, the evidence behind each " +
     "relationship, and the source articles.</li>" +
-    "<li><b>Search</b> finds an entity or article; <b>Connection</b> shows " +
-    "how two entities are linked.</li>" +
-    "<li><b>Briefing</b>, <b>Trends</b>, and <b>Dashboard</b> summarise the " +
-    "whole landscape.</li>" +
+    "<li><b>Story tours</b> in the sidebar walk you through curated threads " +
+    "(Iran war, AI laser stack, low-cost strike, frontier models, " +
+    "Replicator→CCA) with a card per stop.</li>" +
+    "<li><b>What changed</b> in the sidebar shows new entities and articles " +
+    "since your last visit.</li>" +
+    "<li><b>Search</b> finds an entity or article (and now narrows by date " +
+    "or relation); <b>Connection</b> shows how two entities are linked.</li>" +
+    "<li><b>Today's briefing</b>, <b>Trends</b>, and <b>Dashboard</b> " +
+    "summarise the whole landscape.</li>" +
+    "<li>Sliders in <b>View</b> filter by relationship <em>confidence</em> " +
+    "and co-occurrence <em>strength</em> — useful for separating stated " +
+    "facts from passing mentions.</li>" +
     "</ul>" +
     "<h3>Relationship types</h3>" +
     '<ul class="guide-list">' +
@@ -829,13 +970,39 @@ async function findPath() {
 // ---- data loading ----------------------------------------------------------
 
 function readFilters() {
+  // Sliders are 0..100 percent in the UI but the API takes 0..1 floats.
+  const conf = $("f-min-conf") ? Number($("f-min-conf").value) / 100 : 0;
+  const strength = $("f-min-strength") ? Number($("f-min-strength").value) / 100 : 0;
   return {
     type: $("f-type").value,
+    src_type: $("f-src-type") ? $("f-src-type").value : "",
+    dst_type: $("f-dst-type") ? $("f-dst-type").value : "",
     min_mentions: $("f-min-mentions").value,
     min_weight: $("f-min-weight").value,
     max_nodes: $("f-max-nodes").value,
     relations_only: $("f-relations-only").checked ? "1" : "",
+    min_confidence: conf ? conf.toFixed(2) : "",
+    min_strength: strength ? strength.toFixed(2) : "",
   };
+}
+
+function wireSliderReadouts() {
+  const conf = $("f-min-conf");
+  const confOut = $("f-min-conf-out");
+  if (conf && confOut) {
+    const update = () => { confOut.textContent = conf.value + "%"; };
+    conf.addEventListener("input", update);
+    update();
+  }
+  const str = $("f-min-strength");
+  const strOut = $("f-min-strength-out");
+  if (str && strOut) {
+    const update = () => {
+      strOut.textContent = (Number(str.value) / 100).toFixed(2);
+    };
+    str.addEventListener("input", update);
+    update();
+  }
 }
 
 async function loadGraph(params) {
@@ -858,6 +1025,200 @@ async function loadGraph(params) {
     "showing " + shown + " of " + totalNodes + " entities · " +
     graph.edges.length + " relationships" +
     (currentParams.focus ? ' · focus: "' + currentParams.focus + '"' : "");
+  writeUrlState(currentParams);
+}
+
+// ---- URL state -------------------------------------------------------------
+//
+// The current view is encoded in the URL hash so links are shareable and the
+// back button restores prior state. We re-use the same key names the API
+// takes so the hash reads like a query string.
+
+function writeUrlState(params) {
+  const out = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== "" && value != null && value !== "0" && value !== false) {
+      out.set(key, value);
+    }
+  }
+  const hash = out.toString();
+  // Use replaceState rather than location.hash to avoid scrolling and to keep
+  // history clean — each filter tweak shouldn't add a back-stack entry.
+  const target = hash ? "#" + hash : window.location.pathname + window.location.search;
+  if (window.location.hash.slice(1) !== hash) {
+    history.replaceState(null, "", target);
+  }
+}
+
+function readUrlState() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return {};
+  const out = {};
+  for (const [key, value] of new URLSearchParams(hash)) out[key] = value;
+  return out;
+}
+
+function applyUrlStateToControls(state) {
+  if (state.type != null) $("f-type").value = state.type;
+  if (state.src_type != null && $("f-src-type")) $("f-src-type").value = state.src_type;
+  if (state.dst_type != null && $("f-dst-type")) $("f-dst-type").value = state.dst_type;
+  if (state.min_mentions != null) $("f-min-mentions").value = state.min_mentions;
+  if (state.min_weight != null) $("f-min-weight").value = state.min_weight;
+  if (state.max_nodes != null) $("f-max-nodes").value = state.max_nodes;
+  if (state.relations_only != null) {
+    $("f-relations-only").checked = state.relations_only === "1";
+  }
+  if (state.min_confidence != null && $("f-min-conf")) {
+    $("f-min-conf").value = Math.round(Number(state.min_confidence) * 100);
+  }
+  if (state.min_strength != null && $("f-min-strength")) {
+    $("f-min-strength").value = Math.round(Number(state.min_strength) * 100);
+  }
+  if (state.focus) {
+    $("search").value = state.focus;
+  }
+  // Slider read-outs need to recompute.
+  if ($("f-min-conf")) {
+    $("f-min-conf-out").textContent = $("f-min-conf").value + "%";
+  }
+  if ($("f-min-strength")) {
+    $("f-min-strength-out").textContent =
+      (Number($("f-min-strength").value) / 100).toFixed(2);
+  }
+  // If the user has set a non-trivial type pair, reveal the pair-filter row.
+  const pair = document.querySelector("details.pair-filter");
+  if (pair && (state.src_type || state.dst_type)) pair.open = true;
+}
+
+// ---- story tours ----------------------------------------------------------
+
+let TOURS_CACHE = null;
+
+async function refreshTours() {
+  let data;
+  try {
+    data = await api("/api/tours");
+  } catch (e) {
+    $("tour-list").innerHTML = '<div class="muted">unavailable</div>';
+    return;
+  }
+  TOURS_CACHE = data.tours || [];
+  $("tour-list").innerHTML = TOURS_CACHE
+    .map(
+      (t) =>
+        '<button class="tour-card" data-tour="' + escapeHtml(t.id) + '">' +
+        '<div class="tour-title">' + escapeHtml(t.title) + "</div>" +
+        '<div class="tour-tagline">' + escapeHtml(t.tagline) + "</div>" +
+        "</button>"
+    )
+    .join("");
+  $("tour-list").querySelectorAll("[data-tour]").forEach((btn) =>
+    btn.addEventListener("click", () => openTour(btn.dataset.tour))
+  );
+}
+
+function openTour(tourId) {
+  const tour = (TOURS_CACHE || []).find((t) => t.id === tourId);
+  if (!tour) return;
+  let html =
+    '<h2 class="modal-title">' + escapeHtml(tour.title) + "</h2>" +
+    '<p class="tour-tagline-modal">' + escapeHtml(tour.tagline) + "</p>" +
+    '<ol class="tour-stops">' +
+    tour.stops
+      .map(
+        (s, i) =>
+          '<li><div class="tour-step-head" data-focus="' +
+          escapeHtml(s.entity) + '"><span class="tour-num">' + (i + 1) +
+          '</span><span class="tour-entity">' + escapeHtml(s.entity) +
+          "</span></div>" +
+          '<div class="tour-card-body">' + escapeHtml(s.card) +
+          "</div></li>"
+      )
+      .join("") +
+    "</ol>";
+  openModal(html);
+  wireFocusClicks();
+}
+
+// ---- what-changed-this-week sidebar ----------------------------------------
+
+async function refreshRecent() {
+  // Anchor "what's changed" to the user's last visit if we have one, falling
+  // back to a 7-day window for a first visit. Updating the stamp here means
+  // each session sees only deltas since the last one.
+  let since = null;
+  try { since = localStorage.getItem("ail_last_visit"); } catch (e) {}
+  const params = new URLSearchParams();
+  if (since) {
+    params.set("since", since.slice(0, 10));
+  } else {
+    params.set("days", "7");
+  }
+  let data;
+  try {
+    data = await api("/api/recent?" + params.toString());
+  } catch (e) {
+    $("recent").innerHTML = '<div class="muted">unavailable</div>';
+    return;
+  }
+  $("recent-since").textContent = "since " + data.since;
+  const newEnt = data.new_entities || [];
+  const activeEnt = data.active_entities || [];
+  const docs = data.documents || [];
+  let html = "";
+  if (!newEnt.length && !docs.length && !activeEnt.length) {
+    html = '<div class="muted">No changes in this window.</div>';
+  } else {
+    const small = (xs, total, label) =>
+      total
+        ? '<div class="recent-section"><div class="recent-head">' +
+          label + " (" + total + ")</div><ul class=\"click-list compact\">" +
+          xs
+            .slice(0, 6)
+            .map(
+              (n) =>
+                '<li data-focus="' + escapeHtml(n.name) +
+                '"><span>' + escapeHtml(n.name) + "</span><em>" +
+                escapeHtml(n.type) + "</em></li>"
+            )
+            .join("") +
+          "</ul></div>"
+        : "";
+    html += small(newEnt, data.new_entity_total, "New entities");
+    html += small(activeEnt, data.active_entity_total, "Active entities");
+    if (docs.length) {
+      html +=
+        '<div class="recent-section"><div class="recent-head">' +
+        "New articles (" + data.document_total + ")</div>" +
+        '<ul class="articles compact">' +
+        docs
+          .slice(0, 5)
+          .map(
+            (d) =>
+              '<li><a href="' + encodeURI(d.url) +
+              '" target="_blank" rel="noopener noreferrer">' +
+              escapeHtml(d.title || d.url) + "</a>" +
+              '<div class="src">' + escapeHtml(d.source || "") +
+              (d.date ? " · " + escapeHtml(d.date) : "") +
+              "</div></li>"
+          )
+          .join("") +
+        "</ul></div>";
+    }
+  }
+  $("recent").innerHTML = html;
+  $("recent")
+    .querySelectorAll("[data-focus]")
+    .forEach((el) =>
+      el.addEventListener("click", () =>
+        loadGraph(Object.assign(readFilters(), { focus: el.dataset.focus }))
+      )
+    );
+  // Stamp the new visit time only after the panel has rendered, so a quick
+  // page reload still shows the previous window's deltas.
+  try {
+    localStorage.setItem("ail_last_visit", new Date().toISOString());
+  } catch (e) { /* ignore */ }
 }
 
 function renderOverviewPanel(ov) {
@@ -893,15 +1254,29 @@ async function refreshMeta() {
   }
   try {
     const data = await api("/api/types");
-    const typeSelect = $("f-type");
-    typeSelect.innerHTML = '<option value="">all types</option>';
+    const typeSelects = [
+      $("f-type"),
+      $("f-src-type"),
+      $("f-dst-type"),
+    ].filter(Boolean);
+    const placeholderText = [
+      "all types",
+      "any source type",
+      "any target type",
+    ];
+    typeSelects.forEach((sel, i) => {
+      sel.innerHTML =
+        '<option value="">' + placeholderText[i] + "</option>";
+    });
     const legend = $("legend");
     legend.innerHTML = "";
     for (const row of data.types) {
-      const opt = document.createElement("option");
-      opt.value = row.type;
-      opt.textContent = row.type + " (" + row.count + ")";
-      typeSelect.appendChild(opt);
+      typeSelects.forEach((sel) => {
+        const opt = document.createElement("option");
+        opt.value = row.type;
+        opt.textContent = row.type + " (" + row.count + ")";
+        sel.appendChild(opt);
+      });
 
       const li = document.createElement("li");
       li.innerHTML =
@@ -926,10 +1301,16 @@ function onSearchInput() {
     $("search-results").innerHTML = "";
     return;
   }
+  const since = $("search-since") ? $("search-since").value : "";
+  const relation = $("search-relation") ? $("search-relation").value : "";
+  const params = new URLSearchParams();
+  params.set("q", q);
+  if (since) params.set("since", since);
+  if (relation) params.set("relation", relation);
   searchTimer = setTimeout(async () => {
     let data;
     try {
-      data = await api("/api/search?q=" + encodeURIComponent(q));
+      data = await api("/api/search?" + params.toString());
     } catch (e) {
       return;
     }
@@ -977,6 +1358,8 @@ function onSearchInput() {
 
 function init() {
   $("search").addEventListener("input", onSearchInput);
+  if ($("search-since")) $("search-since").addEventListener("change", onSearchInput);
+  if ($("search-relation")) $("search-relation").addEventListener("change", onSearchInput);
   $("apply").addEventListener("click", () => loadGraph(readFilters()));
   $("open-dashboard").addEventListener("click", showDashboard);
   $("open-briefing").addEventListener("click", showBriefing);
@@ -992,8 +1375,20 @@ function init() {
   }
   $("modal-close").addEventListener("click", closeModal);
   $("modal-backdrop").addEventListener("click", closeModal);
+  $("article-close").addEventListener("click", closeArticle);
+  // Delegated click on any "article-open" link → drawer instead of new tab.
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest && e.target.closest(".article-open");
+    if (link && link.dataset.hash) {
+      e.preventDefault();
+      openArticle(link.dataset.hash);
+    }
+  });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModal();
+    if (e.key === "Escape") {
+      if (!$("article-drawer").hidden) closeArticle();
+      else closeModal();
+    }
   });
   window.addEventListener("resize", () => {
     if (cy) {
@@ -1005,21 +1400,56 @@ function init() {
     $("search").value = "";
     $("search-results").innerHTML = "";
     $("f-type").value = "";
+    if ($("f-src-type")) $("f-src-type").value = "";
+    if ($("f-dst-type")) $("f-dst-type").value = "";
     $("f-min-mentions").value = "0";
     $("f-min-weight").value = "8";
     $("f-max-nodes").value = "70";
     $("f-relations-only").checked = false;
+    if ($("f-min-conf")) {
+      $("f-min-conf").value = "0";
+      $("f-min-conf-out").textContent = "0%";
+    }
+    if ($("f-min-strength")) {
+      $("f-min-strength").value = "0";
+      $("f-min-strength-out").textContent = "0.00";
+    }
     loadGraph(readFilters());
   });
-  refreshMeta().then(() => loadGraph(readFilters()));
-  // Show the guide once, on a visitor's first load.
+  wireSliderReadouts();
+  refreshTours();
+  refreshRecent();
+  refreshMeta().then(() => {
+    // Hydrate from URL hash if present (shareable / bookmarkable views).
+    const initial = readUrlState();
+    if (Object.keys(initial).length) {
+      applyUrlStateToControls(initial);
+      loadGraph(Object.assign(readFilters(), initial));
+    } else {
+      loadGraph(readFilters());
+    }
+  });
+  window.addEventListener("hashchange", () => {
+    const state = readUrlState();
+    if (Object.keys(state).length) {
+      applyUrlStateToControls(state);
+      loadGraph(Object.assign(readFilters(), state));
+    }
+  });
+  // First-visit landing: the briefing is the highest-density read-only
+  // surface, so a newcomer sees the synthesis before the graph. The guide
+  // continues to auto-open on a *fresh* first visit (newer flag) so users
+  // who already saw the prior guide don't get it again.
   try {
-    if (!localStorage.getItem("ail_seen_guide")) {
+    if (!localStorage.getItem("ail_seen_landing_v2")) {
+      showBriefing();
+      localStorage.setItem("ail_seen_landing_v2", "1");
+    } else if (!localStorage.getItem("ail_seen_guide")) {
       showGuide();
       localStorage.setItem("ail_seen_guide", "1");
     }
   } catch (e) {
-    /* localStorage unavailable — skip the one-time guide */
+    /* localStorage unavailable — skip the one-time landing */
   }
 }
 

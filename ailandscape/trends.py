@@ -10,6 +10,7 @@ signals reflect when news happened, not when it was scraped.
 """
 
 import collections
+import datetime
 
 from . import corpus
 
@@ -51,6 +52,67 @@ def build_trends(documents, kg_store):
         ],
         "new_entities": [_node_brief(n) for n in newest[:15]],
         "recent_entities": [_node_brief(n) for n in active[:15]],
+    }
+
+
+def build_recent(documents, kg_store, since=None, days=7, limit=15):
+    """Return the slice of the landscape that's new since `since` (or `days`).
+
+    `since` is a date string (YYYY-MM-DD); if absent, `days` ago is used.
+    The returned dict has three lists:
+      * documents — published or fetched on/after the cutoff, newest first
+      * new_entities — nodes whose first_seen is on/after the cutoff
+      * active_entities — nodes whose last_seen is on/after the cutoff
+    The aim is to power a "what changed since you were last here?" surface.
+    """
+    if since:
+        try:
+            cutoff = datetime.date.fromisoformat(since[:10])
+        except ValueError:
+            cutoff = datetime.date.today() - datetime.timedelta(days=days)
+    else:
+        cutoff = datetime.date.today() - datetime.timedelta(days=days)
+    cutoff_iso = cutoff.isoformat()
+
+    nodes = kg_store.nodes()
+    new_nodes = [
+        n for n in nodes if (n["first_seen"] or "") >= cutoff_iso
+    ]
+    new_nodes.sort(key=lambda n: n["first_seen"], reverse=True)
+    active_nodes = [
+        n for n in nodes if (n["last_seen"] or "") >= cutoff_iso
+    ]
+    active_nodes.sort(
+        key=lambda n: (n["last_seen"], n["mention_count"]), reverse=True
+    )
+
+    recent_docs = []
+    for doc in documents:
+        # Prefer the published date; fall back to fetched_at if absent so a
+        # just-scraped article without a parseable published date still shows.
+        date = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
+        if date and date >= cutoff_iso:
+            recent_docs.append((date, doc))
+    recent_docs.sort(key=lambda pair: pair[0], reverse=True)
+
+    return {
+        "since": cutoff_iso,
+        "documents": [
+            {
+                "title": d.get("title", ""),
+                "source": d.get("source", ""),
+                "url": d.get("url", ""),
+                "published": d.get("published", ""),
+                "date": date,
+                "content_hash": d.get("content_hash", ""),
+            }
+            for date, d in recent_docs[:limit]
+        ],
+        "document_total": len(recent_docs),
+        "new_entities": [_node_brief(n) for n in new_nodes[:limit]],
+        "new_entity_total": len(new_nodes),
+        "active_entities": [_node_brief(n) for n in active_nodes[:limit]],
+        "active_entity_total": len(active_nodes),
     }
 
 

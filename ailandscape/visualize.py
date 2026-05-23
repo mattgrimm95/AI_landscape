@@ -49,6 +49,19 @@ def _edge_strength(edge):
         return 0.0
 
 
+def _edge_confidence(edge):
+    """Stored confidence (0..1) for typed relations; None for co-occurrence."""
+    if edge["relation"] == "co_occurs_with":
+        return None
+    meta = edge.get("metadata")
+    if not meta:
+        return None
+    try:
+        return json.loads(meta).get("confidence")
+    except (ValueError, TypeError):
+        return None
+
+
 def select_subgraph(
     nodes,
     edges,
@@ -58,6 +71,10 @@ def select_subgraph(
     max_nodes=70,
     min_weight=3,
     relations_only=False,
+    min_confidence=0.0,
+    min_strength=0.0,
+    src_type=None,
+    dst_type=None,
 ):
     """Pick a comprehensible subgraph to render.
 
@@ -67,7 +84,19 @@ def select_subgraph(
     default view leads with signal rather than a co-occurrence hairball.
     Type / mention / edge-weight filters narrow the result. With
     `relations_only`, plain co-occurrence is dropped entirely, leaving just
-    the typed-relationship graph. Returns (nodes, edges) as filtered lists.
+    the typed-relationship graph.
+
+    Two evidence filters layer on top:
+      * `min_confidence` drops typed edges with confidence below the floor
+        (co-occurrence edges, which have no confidence, are left untouched
+        unless `relations_only` is set).
+      * `min_strength` drops co-occurrence edges below the Jaccard floor.
+
+    `src_type` / `dst_type` further narrow typed edges to those whose ends
+    are of those entity types (e.g. organization → product). Co-occurrence
+    is undirected so the test is applied to either endpoint pair.
+
+    Returns (nodes, edges) as filtered lists.
     """
     by_id = {n["id"]: n for n in nodes}
     candidates = [
@@ -78,14 +107,49 @@ def select_subgraph(
     ]
     candidate_ids = {n["id"] for n in candidates}
 
+    def _passes_evidence(edge):
+        """Apply the confidence / strength / type-pair filters to one edge."""
+        is_typed = edge["relation"] != "co_occurs_with"
+        if is_typed:
+            if min_confidence > 0.0:
+                conf = _edge_confidence(edge)
+                if conf is None or conf < min_confidence:
+                    return False
+            if src_type or dst_type:
+                src = by_id.get(edge["src_id"])
+                dst = by_id.get(edge["dst_id"])
+                if not src or not dst:
+                    return False
+                if src_type and src["type"] != src_type:
+                    return False
+                if dst_type and dst["type"] != dst_type:
+                    return False
+        else:
+            if min_strength > 0.0 and _edge_strength(edge) < min_strength:
+                return False
+            if src_type or dst_type:
+                src = by_id.get(edge["src_id"])
+                dst = by_id.get(edge["dst_id"])
+                if not src or not dst:
+                    return False
+                pair = {src["type"], dst["type"]}
+                if src_type and src_type not in pair:
+                    return False
+                if dst_type and dst_type not in pair:
+                    return False
+        return True
+
     # Typed-relationship participation among the candidates — the signal the
-    # default view and the relations-only view are built around.
+    # default view and the relations-only view are built around. The same
+    # evidence filters used for the final edge cut apply here so a node only
+    # earns "typed" status from edges that will survive rendering.
     typed_degree = collections.Counter()
     for edge in edges:
         if (
             edge["relation"] != "co_occurs_with"
             and edge["src_id"] in candidate_ids
             and edge["dst_id"] in candidate_ids
+            and _passes_evidence(edge)
         ):
             typed_degree[edge["src_id"]] += 1
             typed_degree[edge["dst_id"]] += 1
@@ -103,6 +167,8 @@ def select_subgraph(
             # Typed semantic edges always count; co-occurrence is filtered,
             # and dropped outright in relations-only mode.
             if not is_typed and (relations_only or edge["weight"] < min_weight):
+                continue
+            if not _passes_evidence(edge):
                 continue
             other = None
             if edge["src_id"] == match["id"]:
@@ -149,6 +215,8 @@ def select_subgraph(
             # mode; typed semantic edges are always shown.
             if relations_only or e["weight"] < min_weight:
                 continue
+        if not _passes_evidence(e):
+            continue
         sel_edges.append(e)
     return sel_nodes, sel_edges
 

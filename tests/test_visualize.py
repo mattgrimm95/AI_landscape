@@ -27,8 +27,11 @@ def _edge(src, dst, weight=1, strength=None):
     return edge
 
 
-def _typed_edge(src, dst, relation="develops", weight=1):
-    return {"src_id": src, "dst_id": dst, "relation": relation, "weight": weight}
+def _typed_edge(src, dst, relation="develops", weight=1, confidence=None):
+    edge = {"src_id": src, "dst_id": dst, "relation": relation, "weight": weight}
+    if confidence is not None:
+        edge["metadata"] = json.dumps({"confidence": confidence})
+    return edge
 
 
 class SelectSubgraphTest(unittest.TestCase):
@@ -111,6 +114,45 @@ class SelectSubgraphTest(unittest.TestCase):
         )
         # Only the two typed-edge endpoints survive.
         self.assertEqual({n["id"] for n in nodes}, {2, 4})
+
+    def test_min_confidence_drops_low_confidence_typed_edges(self):
+        edges = [
+            _typed_edge(1, 4, "develops", confidence=0.9),
+            _typed_edge(1, 5, "develops", confidence=0.2),
+        ]
+        _nodes, sel = visualize.select_subgraph(
+            self.nodes, edges, max_nodes=10, min_weight=1, min_confidence=0.5
+        )
+        # The 0.9-confidence edge is kept; the 0.2 one is dropped.
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0]["dst_id"], 4)
+
+    def test_min_strength_drops_weak_cooccurrence(self):
+        edges = [
+            _edge(2, 3, 5, strength=0.7),
+            _edge(2, 4, 5, strength=0.1),
+        ]
+        _nodes, sel = visualize.select_subgraph(
+            self.nodes, edges, max_nodes=10, min_weight=1, min_strength=0.5
+        )
+        kept = {(e["src_id"], e["dst_id"]) for e in sel}
+        self.assertIn((2, 3), kept)
+        self.assertNotIn((2, 4), kept)
+
+    def test_src_dst_type_filters_typed_edges(self):
+        # An org->product develops edge and an org->place located_in edge.
+        edges = [
+            _typed_edge(1, 4, "develops"),       # organization -> product
+            _typed_edge(1, 2, "located_in"),     # organization -> place
+        ]
+        _nodes, sel = visualize.select_subgraph(
+            self.nodes, edges,
+            max_nodes=10, min_weight=1,
+            src_type="organization", dst_type="product",
+        )
+        relations = {(e["src_id"], e["dst_id"], e["relation"]) for e in sel}
+        self.assertIn((1, 4, "develops"), relations)
+        self.assertNotIn((1, 2, "located_in"), relations)
 
     def test_type_filter(self):
         nodes, _edges = visualize.select_subgraph(

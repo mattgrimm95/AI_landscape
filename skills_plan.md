@@ -46,6 +46,7 @@
 * Test Driven Development.
 * Update rules and code to patch corrected errors in a way that preserves the simplicity and integrity of the system overall without becoming a mess of singular, isolated rules.
 * Take as much time as needed on tasks to make sure they are done correctly, accurately, comprehensively, and proficiently.
+* Use good software engineering principles.
 
 ## Project Characteristics
 

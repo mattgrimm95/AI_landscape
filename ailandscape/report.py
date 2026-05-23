@@ -161,6 +161,25 @@ def build_overview(documents, ner_log, kg_store, run_history_path=None):
             "partial_name_dups": len(dups),
             "examples": dups[:5],
         },
+        "reading": _reading_stats(documents),
+    }
+
+
+def _reading_stats(documents):
+    """Claude-read coverage of the corpus — fresh / stale / never-read."""
+    total = len(documents)
+    ever_read = sum(
+        1 for d in documents if int(d.get("claude_read_count", 0) or 0) > 0
+    )
+    fresh = sum(1 for d in documents if d.get("claude_read_fresh"))
+    return {
+        "documents": total,
+        "ever_read": ever_read,
+        "fresh": fresh,
+        "stale": ever_read - fresh,
+        "never_read": total - ever_read,
+        "fresh_pct": (100.0 * fresh / total) if total else 0.0,
+        "ever_read_pct": (100.0 * ever_read / total) if total else 0.0,
     }
 
 

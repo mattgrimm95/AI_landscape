@@ -108,37 +108,68 @@ def _extract_proper_nouns(text, exclude_spans):
             continue
         parts = [core]
         seq_end = tokens[i][2]
+        # Track the original-source span for each kept part, so we can rebuild
+        # `start` correctly if a leading run of titles ("Lt. Col. ...") gets
+        # stripped below.
+        part_starts = [tokens[i][1]]
         j = i + 1
         while j < n:
             w2, _s2, e2 = tokens[j]
             c2 = _clean(w2)
             if c2 and c2[0].isupper() and c2 not in _STOPWORDS:
                 parts.append(c2)
+                part_starts.append(_s2)
                 seq_end = e2
                 j += 1
-            elif c2.lower() in _CONNECTORS and j + 1 < n:
-                nxt = _clean(tokens[j + 1][0])
-                if nxt and nxt[0].isupper() and nxt not in _STOPWORDS:
-                    parts.append(c2.lower())
-                    j += 1
-                else:
-                    break
-            else:
-                break
+                continue
+            # Connector handling: a phrase may bridge one or two lowercase
+            # connectors ("of", "the", "and", "for", "de") if a capitalized
+            # non-stopword follows. This lets us capture "Department of the
+            # Treasury", "Office of the Director of National Intelligence",
+            # "Joint Chiefs of Staff" as single entities — without runaway
+            # consumption of ordinary prose.
+            if c2.lower() in _CONNECTORS:
+                k = j
+                connector_run = []
+                while (
+                    k < n
+                    and k - j < 2  # at most 2 connectors in a row
+                    and _clean(tokens[k][0]).lower() in _CONNECTORS
+                ):
+                    connector_run.append(k)
+                    k += 1
+                if (
+                    k < n
+                    and connector_run
+                    and _clean(tokens[k][0])
+                    and _clean(tokens[k][0])[0].isupper()
+                    and _clean(tokens[k][0]) not in _STOPWORDS
+                ):
+                    for ci in connector_run:
+                        parts.append(_clean(tokens[ci][0]).lower())
+                        part_starts.append(tokens[ci][1])
+                    j = k
+                    continue
+            break
         label = "misc"
         prev_core = _clean(tokens[i - 1][0]).lower() if i > 0 else ""
         if prev_core in _PERSON_TITLES:
             label = "person"
-        # A capitalized person title absorbed as the first token of the
-        # sequence (e.g. "Secretary Lloyd Austin") is stripped off.
-        if (
-            len(parts) > 1
-            and _clean(parts[0]).lower() in _PERSON_TITLES
-            and _clean(parts[1]).lower() not in _CONNECTORS
+        # Strip any *leading* run of person titles that got absorbed into the
+        # phrase ("Secretary Lloyd Austin", "Lt. Col. Jason Kruck"). The first
+        # non-title, non-connector token becomes the start of the entity.
+        strip_to = 0
+        while (
+            strip_to < len(parts) - 1
+            and _clean(parts[strip_to]).lower() in _PERSON_TITLES
+            and _clean(parts[strip_to + 1]).lower() not in _CONNECTORS
         ):
-            parts = parts[1:]
+            strip_to += 1
+        if strip_to:
+            parts = parts[strip_to:]
+            start = part_starts[strip_to]
+            part_starts = part_starts[strip_to:]
             label = "person"
-            start = tokens[i + 1][1]
         if _clean(parts[-1]).lower() in _ORG_SUFFIXES:
             label = "organization"
         phrase = " ".join(parts)
@@ -162,11 +193,26 @@ _NLP = None
 
 
 def _get_nlp():
+    """Load the first available spaCy model from `config.SPACY_MODELS`.
+
+    The preference list (larger first) means a user who installs a bigger
+    model gets higher recall automatically, while a fresh install with only
+    the `en_core_web_sm` that the docs ship still works without configuration.
+    """
     global _NLP
     if _NLP is None:
         import spacy
 
-        _NLP = spacy.load("en_core_web_sm")
+        last_error = None
+        for model_name in config.SPACY_MODELS:
+            try:
+                _NLP = spacy.load(model_name)
+                break
+            except (OSError, ImportError) as exc:
+                last_error = exc
+                continue
+        if _NLP is None:
+            raise last_error or RuntimeError("no spaCy model available")
     return _NLP
 
 

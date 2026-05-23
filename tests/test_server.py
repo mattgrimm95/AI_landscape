@@ -66,6 +66,10 @@ class ServerApiTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+        # Cached corpus / graph state would bleed across tests if a prior run
+        # populated the module-level cache against different files.
+        server._invalidate_caches()
+
         self.client = TestClient(server.app)
 
     def tearDown(self):
