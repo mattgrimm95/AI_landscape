@@ -14,6 +14,7 @@
   <header id="topbar">
     <h1>AI Landscape <span>National-Security Knowledge Graph</span></h1>
     <div id="topbar-right">
+      <button id="topbar-reset" class="ghost" title="Reset view (clear filters and focus)">Reset view</button>
       <button id="open-guide" class="ghost">Guide</button>
       <button id="open-briefing" class="ghost">Today's briefing</button>
       <button id="open-trends" class="ghost">Trends</button>
@@ -24,6 +25,11 @@
 
   <div id="layout">
     <aside id="sidebar">
+      <section class="panel" id="detail-panel" hidden>
+        <h2>Selected entity</h2>
+        <div id="detail"></div>
+      </section>
+
       <section class="panel">
         <h2>Start here</h2>
         <div id="starter-grid" class="starter-grid"></div>
@@ -87,10 +93,10 @@
           <input id="f-min-mentions" type="number" value="0" min="0" />
         </label>
         <label>Min edge weight
-          <input id="f-min-weight" type="number" value="8" min="1" />
+          <input id="f-min-weight" type="number" value="2" min="1" />
         </label>
         <label>Max nodes
-          <input id="f-max-nodes" type="number" value="70" min="5" max="400" />
+          <input id="f-max-nodes" type="number" value="90" min="5" max="400" />
         </label>
         <label class="check">
           <input id="f-relations-only" type="checkbox" />
@@ -123,11 +129,6 @@
         </div>
       </section>
 
-      <section class="panel" id="detail-panel" hidden>
-        <h2>Selected entity</h2>
-        <div id="detail"></div>
-      </section>
-
       <section class="panel">
         <h2>Legend</h2>
         <ul id="legend"></ul>
@@ -136,7 +137,7 @@
 
     <main id="main">
       <div id="cy"></div>
-      <div id="hint">drag to pan · scroll to zoom · click a node for detail · blue arrows are typed relationships</div>
+      <div id="hint">drag to pan · scroll to zoom (more nodes appear as you zoom in) · click a node for detail · blue arrows are typed relationships</div>
       <div id="message"></div>
     </main>
   </div>

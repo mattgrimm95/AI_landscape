@@ -25,6 +25,38 @@ FEEDS = [
     {"name": "War on the Rocks", "category": "defense",
      "url": "https://warontherocks.com/feed/"},
 
+    # --- National-security policy / think-tank feeds — added 2026-05-22
+    #     to broaden coverage with policy analysis adjacent to defense
+    #     reporting. Each URL was probed against feedparser to confirm a
+    #     parseable feed before being added. ---
+    {"name": "CSET (Georgetown)", "category": "defense",
+     "url": "https://cset.georgetown.edu/feed/"},
+    {"name": "Just Security", "category": "defense",
+     "url": "https://www.justsecurity.org/feed/"},
+    {"name": "ASPI Strategist", "category": "defense",
+     "url": "https://www.aspistrategist.org.au/feed/"},
+    {"name": "FedScoop", "category": "defense",
+     "url": "https://fedscoop.com/feed/"},
+    {"name": "Nextgov / FCW", "category": "defense",
+     "url": "https://www.nextgov.com/rss/all/"},
+    {"name": "Atlantic Council", "category": "defense",
+     "url": "https://www.atlanticcouncil.org/feed/"},
+    {"name": "Stimson Center", "category": "defense",
+     "url": "https://www.stimson.org/feed/"},
+    {"name": "DARPA", "category": "defense",
+     "url": "https://www.darpa.mil/rss.xml"},
+
+    # --- AI/defense industry blogs (primary-source company news adjacent
+    #     to the defense AI stack — explicitly added so Palantir, Anduril,
+    #     NVIDIA, Microsoft, and Meta become navigable nodes rather than
+    #     trace mentions). Discovered via `discover-feeds`. ---
+    {"name": "Palantir Blog", "category": "defense",
+     "url": "https://blog.palantir.com/feed/"},
+    {"name": "Microsoft AI Blog", "category": "public_ai",
+     "url": "https://blogs.microsoft.com/ai/feed/"},
+    {"name": "NVIDIA Blog", "category": "public_ai",
+     "url": "https://blogs.nvidia.com/feed/"},
+
     # --- Public AI feeds (broader AI landscape, including academic
     #     sources) — 4 feeds ---
     {"name": "MIT News - AI", "category": "public_ai",
@@ -35,6 +67,17 @@ FEEDS = [
      "url": "https://openai.com/news/rss.xml"},
     {"name": "Google DeepMind", "category": "public_ai",
      "url": "https://deepmind.google/blog/rss.xml"},
+
+    # --- AI-focused tech press, biased toward the deeper / longer-form
+    #     end. IEEE Spectrum's robotics + AI verticals are deep coverage
+    #     of the autonomy stack; MIT Tech Review's AI vertical is the
+    #     bridge from research to mainstream. ---
+    {"name": "IEEE Spectrum - AI", "category": "public_ai",
+     "url": "https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss"},
+    {"name": "IEEE Spectrum - Robotics", "category": "public_ai",
+     "url": "https://spectrum.ieee.org/feeds/topic/robotics.rss"},
+    {"name": "MIT Technology Review - AI", "category": "public_ai",
+     "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed"},
 ]
 
 # SBIR/STTR award queries — a non-RSS data source (see ailandscape/sbir.py).

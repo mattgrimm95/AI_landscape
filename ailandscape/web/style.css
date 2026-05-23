@@ -219,6 +219,23 @@ ul.articles li .src { color: var(--muted); font-size: 11px; margin-top: 1px; }
 /* ---- topbar / modal ---- */
 #topbar-right { display: flex; align-items: center; gap: 12px; }
 #open-dashboard { flex: none; padding: 5px 12px; }
+#topbar-reset {
+  flex: none;
+  padding: 5px 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+#topbar-reset:hover { filter: brightness(1.12); }
+
+/* The Selected-entity panel lives at the top of the sidebar so a click
+   on a node renders detail in the user's eyeline, not 1,000px below the
+   fold. The accent border draws the eye after a click. */
+#detail-panel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(79, 131, 204, 0.25);
+}
+#detail-panel h2 { color: var(--accent); }
 
 #modal { position: fixed; inset: 0; z-index: 50; }
 #modal[hidden] { display: none; }

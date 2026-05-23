@@ -24,6 +24,46 @@ _TYPE_COLORS = {
 }
 _DEFAULT_COLOR = "#9aa0a6"
 
+# Entities so broad they function as categories rather than navigable nodes.
+# When the default landing view is selected (no focus, no type filter, no
+# relations-only mode), these are pushed to the back of the ranking so the
+# screen leads with concrete entities — "U.S. Air Force", "Palantir",
+# "Computer Vision", "MIT" — instead of "Artificial Intelligence" + "United
+# States" dominating the canvas by sheer mention volume. They are NOT
+# removed from the graph: a focused query, a type filter, or a search will
+# still surface them.
+_GENERIC_GIANTS = frozenset(
+    name.lower()
+    for name in (
+        "Artificial Intelligence",
+        "AI",
+        "United States",
+        "U.S.",
+        "US",
+        "America",
+        "American",
+        "Americans",
+        "China",
+        "Chinese",
+        "Russia",
+        "Russian",
+        "Europe",
+        "European",
+        "Ukraine",
+        "Ukrainian",
+        "Iran",
+        "Iranian",
+        "Israel",
+        "Israeli",
+        "WASHINGTON",
+        "Washington",
+    )
+)
+
+
+def _is_generic_giant(node):
+    return (node.get("canonical_name") or "").lower() in _GENERIC_GIANTS
+
 
 def _degree(edges):
     degree = collections.Counter()
@@ -193,16 +233,27 @@ def select_subgraph(
         pool = candidates
         if relations_only:
             pool = [n for n in candidates if typed_degree.get(n["id"], 0)]
-        # Typed-relationship participants first, then the most-connected.
-        ranked = sorted(
-            pool,
-            key=lambda n: (
+        # In the default landing view (no type filter, no relations-only
+        # mode), generic giants like "AI" and "United States" are demoted to
+        # the bottom of the ranking so the screen leads with concrete,
+        # navigable entities. Any user-narrowed view (type filter, relations
+        # only, focus) skips this so the giants still surface when they're
+        # actually what the user asked for.
+        demote_generics = node_type is None and not relations_only
+
+        def rank_key(n):
+            demoted = demote_generics and _is_generic_giant(n)
+            return (
+                # not demoted (True > False), then typed degree, then total
+                # degree, then sheer mention count. Demoted entities sort
+                # last in every tier.
+                not demoted,
                 typed_degree.get(n["id"], 0),
                 degree.get(n["id"], 0),
                 n["mention_count"],
-            ),
-            reverse=True,
-        )
+            )
+
+        ranked = sorted(pool, key=rank_key, reverse=True)
         keep = {n["id"] for n in ranked[:max_nodes]}
 
     sel_nodes = [by_id[i] for i in keep if i in by_id]

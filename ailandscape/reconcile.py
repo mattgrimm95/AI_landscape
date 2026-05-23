@@ -21,6 +21,36 @@ _DEFAULT_IGNORE = {
     "analysts", "analyst", "leaders", "leader", "members", "member",
 }
 
+# Page-chrome tokens. If an entity surface form contains any of these as a
+# whole word, it's an inline metadata-label leak (e.g. "Website Keywords",
+# "Subscribe Newsletter", "Authors List") rather than a real named entity.
+# Generic enough to catch the pattern across scraped sites without
+# hard-coding "Website Keywords" specifically.
+_BOILERPLATE_TOKENS = frozenset({
+    "keywords", "keyword", "tags", "tag", "categories", "category",
+    "subscribe", "newsletter", "topics", "topic", "subject",
+    "authors", "affiliation", "department", "citation", "doi",
+    # "Links" / "Website" / "Email" / "Phone" / "Contact" already get
+    # stripped as attribute boilerplate (_ATTR_BOILERPLATE), so they only
+    # land here when wedged into an entity span by NER itself.
+    "links", "website", "phone", "contact",
+})
+_BOILERPLATE_TOKEN_RE = re.compile(r"\b\w+\b")
+
+
+def _is_boilerplate_entity(text):
+    """An entity that contains a page-chrome metadata word is not an entity.
+
+    Used to drop pseudo-entities like "Website Keywords" that come from a
+    scraper's metadata block leaking into the body text. A real entity (a
+    real person, organization, etc.) very rarely contains "Keywords",
+    "Subscribe", "Newsletter", "Tags", etc. as one of its constituent words.
+    """
+    if not text:
+        return False
+    tokens = [t.lower() for t in _BOILERPLATE_TOKEN_RE.findall(text)]
+    return any(t in _BOILERPLATE_TOKENS for t in tokens)
+
 # Documents with more distinct entities than this contribute no edges,
 # keeping the co-occurrence graph from exploding on very long pages.
 _MAX_EDGE_ENTITIES = 60
@@ -219,6 +249,10 @@ def reconcile(documents, ner_log, kg_store, corrections=None, log=None):
         clean_text, attrs = _split_attributes(raw_text)
         if not clean_text:
             clean_text = raw_text
+        if _is_boilerplate_entity(clean_text):
+            # Page-chrome metadata leak ("Website Keywords", "Subscribe
+            # Newsletter", etc.) — never a real entity.
+            return None
         alias = normalize(clean_text)
         if not alias or alias in ignore or _is_noise(alias):
             return None

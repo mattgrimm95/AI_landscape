@@ -143,8 +143,11 @@ def api_graph(
     focus: Optional[str] = None,
     type: Optional[str] = None,
     min_mentions: int = 0,
-    max_nodes: int = Query(70, ge=1, le=400),
-    min_weight: int = Query(8, ge=1),
+    # Defaults chosen so the landing graph reads as "specific entities" —
+    # 90 nodes (was 70) with a min_weight of 2 (was 8) keeps most real
+    # links instead of dropping all but the megahub-to-megahub ones.
+    max_nodes: int = Query(90, ge=1, le=400),
+    min_weight: int = Query(2, ge=1),
     relations_only: bool = False,
     min_confidence: float = Query(0.0, ge=0.0, le=1.0),
     min_strength: float = Query(0.0, ge=0.0, le=1.0),

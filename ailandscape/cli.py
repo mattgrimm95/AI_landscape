@@ -15,6 +15,9 @@ Usage:
     python -m ailandscape.cli digest     email the daily digest (opt-in; needs SMTP env vars + recipients)
     python -m ailandscape.cli visualize  render a static interactive HTML graph
     python -m ailandscape.cli serve       run the interactive web app (browser)
+    python -m ailandscape.cli discover-feeds         probe new AI/nat-sec RSS feeds
+    python -m ailandscape.cli discover-feeds --health-check    audit existing feeds
+    python -m ailandscape.cli enrich plan.json       fetch articles + synthesis, rebuild
     python -m ailandscape.cli correct merge "DoD" "Department of Defense"
     python -m ailandscape.cli snapshot   export the corpus and databases to snapshots/
     python -m ailandscape.cli reset --confirm   delete the derived databases
@@ -31,8 +34,8 @@ import sys
 import tempfile
 
 from . import (
-    briefing, config, corpus, emailer, pipeline, reconcile, report, review,
-    scraper, synthesis, trends, visualize,
+    briefing, config, corpus, emailer, enrich, feed_discovery, pipeline,
+    reconcile, report, review, scraper, synthesis, trends, visualize,
 )
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
@@ -388,6 +391,89 @@ def cmd_correct(args):
     return 0
 
 
+def cmd_enrich(args):
+    """Run an entity-enrichment plan: fetch the listed articles + optional
+    synthesis, append them to the corpus, then rebuild so the new entities
+    propagate into the NER log and the knowledge graph.
+
+    A plan is a JSON file shaped {entity, articles[], synthesis{}}. See
+    ailandscape/enrich.py for the schema. `--no-rebuild` lets the caller
+    chain several enrichment plans together and rebuild once at the end.
+    """
+    config.ensure_dirs()
+    with open(args.plan, "r", encoding="utf-8") as handle:
+        plan = json.load(handle)
+    result = enrich.enrich_from_plan(
+        config.CORPUS_FILE, plan, log=_log
+    )
+    print(json.dumps(result, indent=2))
+    if args.no_rebuild:
+        return 0
+    if not (result["articles_added"] or result["synthesis_added"]):
+        print("nothing new added — skipping rebuild.")
+        return 0
+    ner_log, kg = _open_stores()
+    try:
+        rebuilt = pipeline.rebuild(
+            config.CORPUS_FILE,
+            ner_log,
+            kg,
+            ner_backend=args.ner,
+            corrections=reconcile.load_corrections(CORRECTIONS_FILE),
+            log=_log,
+        )
+    finally:
+        ner_log.close()
+        kg.close()
+    print(json.dumps({"rebuilt": rebuilt["graph"]}, indent=2))
+    return 0
+
+
+def cmd_discover_feeds(args):
+    """Probe candidate RSS URLs for AI/national-security organizations.
+
+    Verified candidates are printed; nothing is auto-added to feeds.py — the
+    feeds list is curated by hand and version-controlled, so the user
+    decides which suggestions land. With --health-check, run the verify
+    step against every URL already in feeds.FEEDS and report broken ones.
+    """
+    if args.health_check:
+        healthy, unhealthy = feed_discovery.health_check_existing(
+            feeds_mod.FEEDS
+        )
+        print("Healthy feeds (%d):" % len(healthy))
+        for h in healthy:
+            print("  OK   %-30s %4d entries  %s"
+                  % (h["name"][:30], h["status"]["entries"], h["url"]))
+        if unhealthy:
+            print("\nBroken feeds (%d):" % len(unhealthy))
+            for u in unhealthy:
+                print("  ERR  %-30s %s  (%s)" %
+                      (u["name"][:30], u["url"], u["status"]["error"][:50]))
+        return 0
+    seeds = feed_discovery.DEFAULT_SEEDS
+    print("Probing %d organizations for RSS feeds…" % len(seeds))
+    verified = feed_discovery.discover_candidates(seeds)
+    if not verified:
+        print("No feeds discovered.")
+        return 0
+    print("\nDiscovered %d feed(s):" % len(verified))
+    known_urls = {f["url"] for f in feeds_mod.FEEDS}
+    for f in verified:
+        marker = "*ALREADY*" if f["url"] in known_urls else "NEW"
+        print("  %-9s %-32s %4d entries  %s"
+              % (marker, f["name"][:32], f["entries"], f["url"]))
+    new_feeds = [f for f in verified if f["url"] not in known_urls]
+    if new_feeds:
+        print(
+            "\nAdd a discovered feed by appending to ailandscape/feeds.py:"
+        )
+        for f in new_feeds[:3]:
+            print('  {"name": %r, "category": "defense", "url": %r},'
+                  % (f["name"], f["url"]))
+    return 0
+
+
 def cmd_serve(args):
     import uvicorn
 
@@ -633,6 +719,34 @@ def build_parser():
     serve_p = sub.add_parser("serve", help="run the interactive web app")
     serve_p.add_argument("--port", type=int, default=8000)
     serve_p.set_defaults(func=cmd_serve)
+
+    enrich_p = sub.add_parser(
+        "enrich",
+        help="execute an entity-enrichment plan (fetch articles + synthesis),"
+             " then rebuild",
+    )
+    enrich_p.add_argument(
+        "plan", help="path to a JSON enrichment plan (see ailandscape/enrich.py)",
+    )
+    enrich_p.add_argument(
+        "--ner", choices=["rule", "spacy", "hybrid"], default=None,
+    )
+    enrich_p.add_argument(
+        "--no-rebuild", action="store_true",
+        help="append to the corpus but don't trigger the rebuild — chain"
+             " several plans, then run `rebuild` once at the end",
+    )
+    enrich_p.set_defaults(func=cmd_enrich)
+
+    discover_p = sub.add_parser(
+        "discover-feeds",
+        help="probe candidate RSS URLs for AI/national-security organizations",
+    )
+    discover_p.add_argument(
+        "--health-check", action="store_true",
+        help="verify every URL already in feeds.FEEDS; do not probe new candidates",
+    )
+    discover_p.set_defaults(func=cmd_discover_feeds)
     sub.add_parser(
         "snapshot", help="export the corpus and databases to snapshots/"
     ).set_defaults(func=cmd_snapshot)

@@ -51,6 +51,12 @@ const RELATION_MEANING = (() => {
 let cy = null;
 let currentParams = {};
 let totalNodes = 0;
+// Semantic zoom: as the user zooms past these thresholds we re-fetch the
+// graph with a larger max_nodes so previously-too-small nodes can appear.
+// The thresholds and ladder are chosen so the densification feels like
+// natural drill-in rather than a re-layout shock.
+const ZOOM_DENSITY_LADDER = [90, 160, 260, 400];
+let currentDensityIndex = 0;
 
 // Use the fcose layout (better cluster spread) when its extension loaded.
 let LAYOUT_NAME = "cose";
@@ -133,6 +139,10 @@ function toElements(graph) {
   const maxMentions = Math.max(1, ...graph.nodes.map((n) => n.mentions));
   const elements = [];
   for (const n of graph.nodes) {
+    // Log-scaled sizing compresses the long tail so a 1,400-mention giant
+    // doesn't visually dwarf a 30-mention specific entity by 5×. The
+    // base/range stays the same so the largest nodes still stand out.
+    const sizeRatio = Math.log(1 + n.mentions) / Math.log(1 + maxMentions);
     elements.push({
       data: {
         id: String(n.id),
@@ -141,7 +151,7 @@ function toElements(graph) {
         mentions: n.mentions,
         documents: n.documents,
         color: TYPE_COLORS[n.type] || DEFAULT_COLOR,
-        size: 16 + 56 * Math.sqrt(n.mentions / maxMentions),
+        size: 18 + 48 * sizeRatio,
       },
     });
   }
@@ -226,14 +236,20 @@ function renderGraph(graph) {
       style: CY_STYLE,
       layout: layoutOptions(layoutName),
       minZoom: 0.08,
-      maxZoom: 3.5,
-      wheelSensitivity: 0.25,
+      maxZoom: 4.0,
+      // Higher = faster zoom per scroll tick. 0.25 felt sluggish; 0.7 is
+      // closer to a native browser zoom feel without overshooting.
+      wheelSensitivity: 0.7,
     });
   try {
     cy = build(LAYOUT_NAME);
   } catch (e) {
     cy = build("cose"); // fall back if the fcose extension is unavailable
   }
+  // Expose the cytoscape instance for in-page debugging and to let helpers
+  // outside renderGraph (e.g. focus animations from the detail panel) reach
+  // the live graph without threading the reference through every call.
+  window.cy = cy;
   cy.on("tap", "node", (evt) => selectNode(evt.target.id()));
   cy.on("tap", "edge", (evt) => {
     const ev = evt.target.data("evidence");
@@ -252,6 +268,43 @@ function renderGraph(graph) {
   });
   cy.on("tap", (evt) => {
     if (evt.target === cy) clearSelection();
+  });
+  // Semantic zoom: when the user zooms in past a threshold, raise the
+  // density ladder so the next graph load shows more (smaller) nodes. The
+  // dispatch is debounced so a single scroll-burst doesn't fire a hundred
+  // re-fetches.
+  cy.on("zoom", debouncedMaybeDensify);
+}
+
+let densifyTimer = null;
+function debouncedMaybeDensify() {
+  clearTimeout(densifyTimer);
+  densifyTimer = setTimeout(maybeDensify, 350);
+}
+
+// Cytoscape default zoom after fit is ~1.0. The thresholds below are tuned
+// so a user who scroll-wheel-zooms once or twice past the default sees the
+// graph fill in with previously-too-small nodes.
+const ZOOM_THRESHOLDS = [1.3, 1.9, 2.6, 3.3];
+
+function maybeDensify() {
+  if (!cy) return;
+  const z = cy.zoom();
+  let target = 0;
+  for (let i = 0; i < ZOOM_THRESHOLDS.length; i++) {
+    if (z >= ZOOM_THRESHOLDS[i]) target = i + 1;
+  }
+  // Cap at the ladder length so we don't index past the array.
+  target = Math.min(target, ZOOM_DENSITY_LADDER.length - 1);
+  if (target === currentDensityIndex) return;
+  // Only densify upward as the user drills in; zooming back out keeps the
+  // current density so the graph doesn't shrink unexpectedly.
+  if (target < currentDensityIndex) return;
+  currentDensityIndex = target;
+  const max = ZOOM_DENSITY_LADDER[target];
+  setMessage("Loading more entities (zoom level " + (target + 1) + ")…");
+  loadGraph(Object.assign({}, currentParams, { max_nodes: String(max) }), {
+    preserveDensity: true,
   });
 }
 
@@ -288,6 +341,16 @@ async function selectNode(id) {
   }
   renderDetail(data, docs);
   highlightNeighborhood(id);
+  // The Selected-entity panel lives at the top of the sidebar; scroll the
+  // sidebar to its top so users always see the populated panel after a
+  // click. Without this, on tall sidebars a click can silently update an
+  // off-screen panel and look like a no-op.
+  const panel = $("detail-panel");
+  if (panel && !panel.hidden) {
+    const sidebar = $("sidebar");
+    if (sidebar) sidebar.scrollTop = 0;
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
 function momentumHtml(m) {
@@ -729,6 +792,34 @@ async function showTrends() {
   wireFocusClicks();
 }
 
+// Restore the default landing view. Reachable from both the View-panel
+// "Reset" and a sticky topbar button, so a user lost in a deep filter
+// state always has a one-click way back to the starting graph.
+function resetView() {
+  $("search").value = "";
+  $("search-results").innerHTML = "";
+  $("f-type").value = "";
+  if ($("f-src-type")) $("f-src-type").value = "";
+  if ($("f-dst-type")) $("f-dst-type").value = "";
+  $("f-min-mentions").value = "0";
+  $("f-min-weight").value = "2";
+  $("f-max-nodes").value = "90";
+  $("f-relations-only").checked = false;
+  if ($("f-min-conf")) {
+    $("f-min-conf").value = "0";
+    $("f-min-conf-out").textContent = "0%";
+  }
+  if ($("f-min-strength")) {
+    $("f-min-strength").value = "0";
+    $("f-min-strength-out").textContent = "0.00";
+  }
+  // Clear the focus from the URL too — leaving the hash with focus= would
+  // re-apply it on the next loadGraph and undo the reset.
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  loadGraph(readFilters());
+  setMessage("View reset to the default landscape.");
+}
+
 function applyStarter(key) {
   const view = STARTER_VIEWS[key];
   if (!view) return;
@@ -736,8 +827,8 @@ function applyStarter(key) {
   $("f-type").value = p.type || "";
   $("f-relations-only").checked = !!p.relations_only;
   $("f-min-mentions").value = "0";
-  $("f-min-weight").value = "8";
-  $("f-max-nodes").value = "70";
+  $("f-min-weight").value = "2";
+  $("f-max-nodes").value = "90";
   $("search").value = "";
   $("search-results").innerHTML = "";
   loadGraph(readFilters());
@@ -1005,8 +1096,13 @@ function wireSliderReadouts() {
   }
 }
 
-async function loadGraph(params) {
+async function loadGraph(params, options) {
   currentParams = params || {};
+  options = options || {};
+  // A user-initiated load (apply/reset/focus) resets the zoom-density
+  // ladder so we start lean again; a load triggered by the semantic-zoom
+  // densifier explicitly preserves it.
+  if (!options.preserveDensity) currentDensityIndex = 0;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(currentParams)) {
     if (value !== "" && value != null) query.set(key, value);
@@ -1019,7 +1115,9 @@ async function loadGraph(params) {
     return;
   }
   renderGraph(graph);
-  $("detail-panel").hidden = true;
+  // Don't clobber an open detail panel when the load was a passive
+  // densification — keep the user's selection visible.
+  if (!options.preserveDensity) $("detail-panel").hidden = true;
   const shown = graph.nodes.length;
   $("stats").textContent =
     "showing " + shown + " of " + totalNodes + " entities · " +
@@ -1396,26 +1494,8 @@ function init() {
       cy.fit(undefined, 45);
     }
   });
-  $("reset").addEventListener("click", () => {
-    $("search").value = "";
-    $("search-results").innerHTML = "";
-    $("f-type").value = "";
-    if ($("f-src-type")) $("f-src-type").value = "";
-    if ($("f-dst-type")) $("f-dst-type").value = "";
-    $("f-min-mentions").value = "0";
-    $("f-min-weight").value = "8";
-    $("f-max-nodes").value = "70";
-    $("f-relations-only").checked = false;
-    if ($("f-min-conf")) {
-      $("f-min-conf").value = "0";
-      $("f-min-conf-out").textContent = "0%";
-    }
-    if ($("f-min-strength")) {
-      $("f-min-strength").value = "0";
-      $("f-min-strength-out").textContent = "0.00";
-    }
-    loadGraph(readFilters());
-  });
+  $("reset").addEventListener("click", resetView);
+  $("topbar-reset").addEventListener("click", resetView);
   wireSliderReadouts();
   refreshTours();
   refreshRecent();

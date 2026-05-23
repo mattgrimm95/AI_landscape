@@ -184,13 +184,55 @@ def reading_stats(path):
     }
 
 
+# Scraped academic / blog pages inline structured metadata blocks with no
+# separators between the metadata label and the body text, e.g.
+#   "Authors : Name1, Name2 Contact : email Links: Paper | Website Keywords :
+#    topic1, topic2, topic3 When classifying grammatical role, BERT..."
+# NER then chains capitalized neighbours across the label boundary and
+# invents pseudo-entities like "Website Keywords". The fix is surgical: we
+# only delete the *label* itself (and the trailing colon), inserting a
+# period so the proper-noun chain breaks. The actual content — the authors
+# list, the keyword tags, the body that follows — is preserved verbatim,
+# so we never accidentally lose article text.
+_METADATA_LABEL_NAMES = (
+    "Authors?", "Contact", "Links?", "Keywords?", "Tags?", "Categor(?:y|ies)",
+    "Topics?", "Subject", "Subscribe", "Newsletter", "Email", "Phone",
+    "Website", "Affiliation", "Department", "Citation", "DOI",
+)
+# The pattern matches `<Label>:` (with optional whitespace) — only labels
+# IMMEDIATELY followed by a colon, so prose like "Keywords are powerful"
+# is left alone.
+_METADATA_LABEL = re.compile(
+    r"\b(?:" + "|".join(_METADATA_LABEL_NAMES) + r")\s*[:：]\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_metadata_labels(text):
+    """Replace inline page-chrome labels ("Keywords :", "Authors :", etc.)
+    with a sentence break so NER cannot chain across them.
+
+    No content is deleted; only the label word and its colon are removed.
+    A "Website Keywords : topic" run becomes ". topic", which NER reads as
+    a sentence boundary instead of glueing "Website Keywords" into a single
+    pseudo-entity. A no-op on text without label patterns.
+    """
+    if not text:
+        return text
+    return _METADATA_LABEL.sub(". ", text)
+
+
 def document_text(doc):
     """The text NER and relation extraction operate on: title + body.
 
     Defined once so the entity offsets recorded by NER stay valid for the
-    relation extractor, which works on the same string.
+    relation extractor, which works on the same string. Page-chrome labels
+    ("Keywords :", "Authors :", "Links:") are normalized to sentence breaks
+    first, so NER's proper-noun chain doesn't cross into a metadata block
+    and emit pseudo-entities like "Website Keywords".
     """
-    return (doc.get("title", "") + ". " + doc.get("raw_text", "")).strip()
+    raw = doc.get("raw_text", "") or ""
+    return (doc.get("title", "") + ". " + _strip_metadata_labels(raw)).strip()
 
 
 def published_date(doc):
