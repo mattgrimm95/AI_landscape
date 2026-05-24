@@ -232,10 +232,29 @@ ul.articles li .src { color: var(--muted); font-size: 11px; margin-top: 1px; }
    on a node renders detail in the user's eyeline, not 1,000px below the
    fold. The accent border draws the eye after a click. */
 #detail-panel {
+  position: relative;       /* anchor for the close button */
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(79, 131, 204, 0.25);
 }
 #detail-panel h2 { color: var(--accent); }
+/* Close X — visible, generous touch target, in the panel's top right.
+   Same visual idiom as the modal-close + article-close so the user
+   learns one pattern. */
+.panel-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex: none;
+  z-index: 2;
+}
+.panel-close:hover { color: var(--text); }
 
 #modal { position: fixed; inset: 0; z-index: 50; }
 #modal[hidden] { display: none; }

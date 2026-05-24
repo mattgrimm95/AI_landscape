@@ -85,15 +85,22 @@ function layoutOptions(name) {
       randomize: true,
       fit: true,
       padding: 55,
-      nodeRepulsion: 14000,
-      idealEdgeLength: 90,      // connected nodes (a grouping) stay close
-      edgeElasticity: 0.4,
-      nodeSeparation: 150,      // push everything else well apart
-      gravity: 0.18,
-      gravityRange: 4.0,
-      numIter: 2600,
+      // Tuned up for breathing room: a 90-node default view was packing
+      // labels on top of each other. Roughly 2x the repulsion + 50%
+      // longer ideal edges spreads the graph without changing structure.
+      nodeRepulsion: 32000,
+      idealEdgeLength: 140,     // connected nodes (a grouping) stay close
+      edgeElasticity: 0.3,
+      nodeSeparation: 240,      // push everything else well apart
+      gravity: 0.12,
+      gravityRange: 5.0,
+      numIter: 3000,
       packComponents: true,
       tile: true,
+      // tileByZIndex / tilingPaddingVertical+Horizontal keep disconnected
+      // mini-clusters from piling on top of each other in the corners.
+      tilingPaddingVertical: 30,
+      tilingPaddingHorizontal: 30,
     };
   }
   return {
@@ -101,9 +108,9 @@ function layoutOptions(name) {
     animate: false,
     fit: true,
     padding: 45,
-    nodeRepulsion: 26000,
-    idealEdgeLength: 95,
-    gravity: 0.25,
+    nodeRepulsion: 55000,
+    idealEdgeLength: 150,
+    gravity: 0.15,
     componentSpacing: 140,
   };
 }
@@ -2074,6 +2081,13 @@ function init() {
   $("modal-close").addEventListener("click", closeModal);
   $("modal-backdrop").addEventListener("click", closeModal);
   $("article-close").addEventListener("click", closeArticle);
+  // Close X on the entity detail panel. Same effect as clicking on the
+  // empty graph area (clearSelection drops the highlight + hides the
+  // panel), but explicit so the affordance is discoverable.
+  const detailClose = document.querySelector('#detail-close');
+  if (detailClose) {
+    detailClose.addEventListener('click', clearSelection);
+  }
   // Delegated click on any "article-open" link → drawer instead of new tab.
   document.addEventListener("click", (e) => {
     const link = e.target.closest && e.target.closest(".article-open");

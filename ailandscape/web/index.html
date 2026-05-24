@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Landscape — Knowledge Graph</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260523c" />
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/layout-base/layout-base.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cose-base/cose-base.js"></script>
@@ -48,6 +48,7 @@
   <div id="layout">
     <aside id="sidebar">
       <section class="panel" id="detail-panel" hidden>
+        <button id="detail-close" class="panel-close" aria-label="Close entity panel" title="Close (or click empty space on the graph)">&times;</button>
         <h2>Selected entity</h2>
         <div id="detail"></div>
       </section>
@@ -240,6 +241,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260523c"></script>
 </body>
 </html>
