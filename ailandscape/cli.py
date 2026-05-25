@@ -529,28 +529,183 @@ def _ask_yes(force_yes, prompt):
     return answer in ("y", "yes")
 
 
+def cmd_history(args):
+    """Print the ingest-history log as a readable table.
+
+    Reads snapshots/run-history.jsonl (the per-run record the daily
+    pipeline appends to) and surfaces the last N runs with finish time,
+    fetched / added / filtered counts, document totals, and any errors
+    in the per-feed scorecard so a missed cron, a broken feed, or a
+    quality slip is visible at a glance over time.
+
+    With --full, includes the per-feed scorecard for each run; otherwise
+    only the runs with non-empty errors get their bad feeds enumerated.
+    """
+    path = config.RUN_HISTORY_FILE
+    if not path.exists():
+        legacy = config._LEGACY_RUN_HISTORY
+        if legacy.exists():
+            print("(reading legacy %s -- consider running 'rebuild' once to migrate)"
+                  % legacy)
+            path = legacy
+        else:
+            print("No run-history file yet. Run `ailandscape run` once.")
+            return 0
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    runs = [json.loads(ln) for ln in lines]
+    runs = runs[-args.limit:] if args.limit > 0 else runs
+    if not runs:
+        print("(empty)")
+        return 0
+
+    # Header
+    print("Pipeline run history (most recent at bottom)")
+    print("-" * 96)
+    print("%-20s  %5s  %5s  %5s  %6s  %6s  %5s  %7s  %5s"
+          % ("finished_at (UTC)", "fetch", "add", "filt", "scrape", "rebld",
+             "docs", "nodes", "typed"))
+    print("-" * 96)
+    for r in runs:
+        finished = (r.get("finished_at") or "").replace("T", " ")[:19]
+        print("%-20s  %5s  %5s  %5s  %5.0fs  %5.0fs  %5d  %7d  %5d"
+              % (finished,
+                 r.get("fetched", "-"),
+                 r.get("added", "-"),
+                 r.get("filtered_non_ai", "-"),
+                 r.get("scrape_seconds", 0) or 0,
+                 r.get("rebuild_seconds", 0) or 0,
+                 r.get("documents", 0) or 0,
+                 r.get("nodes", 0) or 0,
+                 r.get("typed_relations", 0) or 0))
+        # Always show broken feeds (per-feed scorecard with non-empty error)
+        feeds = (r.get("feeds") or {})
+        bad = [(name, info.get("error", ""))
+               for name, info in feeds.items()
+               if info.get("error")]
+        for name, err in bad:
+            print("    feed-error: %-30s %s" % (name[:30], err[:60]))
+        if args.full and feeds:
+            for name, info in feeds.items():
+                if not info.get("error"):
+                    print("    %-32s  fetched=%-4d  added=%-4d  filt=%-4d"
+                          % (name[:32], info.get("fetched", 0),
+                             info.get("added", 0),
+                             info.get("filtered_non_ai", 0)))
+    return 0
+
+
+def _is_protected_doc(doc):
+    """Return True for docs that bypass the AI gate (always kept).
+
+    Claude syntheses are operator-authored summary docs; SBIR / J-Book
+    records went through their own AI gate at ingest time.
+    """
+    src = doc.get("source", "")
+    meta = doc.get("metadata") or {}
+    return (src == "Claude synthesis"
+            or meta.get("synthesis")
+            or meta.get("data_source") in ("SBIR", "J-Book"))
+
+
+def _append_archive(docs, reason):
+    """Append `docs` to the corpus archive with archived_at + reason."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    config.CORPUS_ARCHIVE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with config.CORPUS_ARCHIVE_FILE.open("a", encoding="utf-8") as handle:
+        for doc in docs:
+            record = dict(doc)
+            record["archived_at"] = now
+            record["archived_reason"] = reason
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+
+
+def _load_archive():
+    """Return list of archived docs (each with archived_at + archived_reason)."""
+    path = config.CORPUS_ARCHIVE_FILE
+    if not path.exists():
+        return []
+    out = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+    return out
+
+
 def cmd_audit_corpus_ai(args):
     """Scan the corpus for documents that don't pass the AI relevance bar.
 
-    Prints a per-source breakdown of how many docs would fail the gate
-    plus the first 20 titles. With --prune, rewrites corpus/documents.jsonl
-    in place, keeping only AI-relevant docs (synthesis docs and SBIR awards
-    are always kept). The pruned-out docs' content_hashes are NOT cached
-    anywhere so a future re-scrape may re-attempt them; that's a feature,
-    not a bug — the bar might change.
+    Default (no flag): audit-only -- report counts per source + 20 titles.
+
+    With --prune: MOVE dropped docs to corpus/archived.jsonl (NOT discard).
+    The archive lives alongside the active corpus and is tracked in git,
+    so the work to scrape those articles is never wasted. If the AI
+    filter parameters change later, --reinstate scans the archive for
+    docs that now pass the gate and moves them back into the active
+    corpus -- no re-scraping required.
+
+    Always preserves Claude syntheses and SBIR/J-Book records (those
+    went through their own AI gate at ingest time).
     """
     config.ensure_dirs()
+
+    # --- --reinstate path: pull archived docs back into the active corpus
+    if args.reinstate:
+        archive = _load_archive()
+        if not archive:
+            print("Archive is empty -- nothing to reinstate.")
+            return 0
+        active_hashes = corpus.hashes(config.CORPUS_FILE)
+        bring_back = []
+        keep_archived = []
+        for doc in archive:
+            chash = doc.get("content_hash", "")
+            if chash and chash in active_hashes:
+                # Already in the active corpus (someone re-ingested);
+                # drop the archive copy so we don't double-store.
+                continue
+            text = (doc.get("title", "") + " "
+                    + (doc.get("raw_text", "") or ""))
+            if ai_terms.is_ai_relevant(text) or _is_protected_doc(doc):
+                bring_back.append(doc)
+            else:
+                keep_archived.append(doc)
+        deduped = len(archive) - len(bring_back) - len(keep_archived)
+        print("Archive reinstate:")
+        print("  archived docs: %d" % len(archive))
+        print("  reinstating:   %d (now pass the AI gate)" % len(bring_back))
+        print("  keep archived: %d (still don't pass)" % len(keep_archived))
+        if deduped:
+            print("  deduped:       %d (already in active corpus -- dropped from archive)"
+                  % deduped)
+        # Strip the archive-only fields before appending to the active corpus.
+        for doc in bring_back:
+            doc.pop("archived_at", None)
+            doc.pop("archived_reason", None)
+            corpus.append(config.CORPUS_FILE, doc)
+        # Rewrite the archive in any case where its contents changed -- the
+        # dedupe path (archived hash already in active corpus) also needs
+        # to drop the archive copy so we don't double-store.
+        if bring_back or deduped:
+            path = config.CORPUS_ARCHIVE_FILE
+            path.write_text(
+                "\n".join(json.dumps(d, ensure_ascii=False, sort_keys=True)
+                         for d in keep_archived) + ("\n" if keep_archived else ""),
+                encoding="utf-8",
+            )
+        if bring_back:
+            print()
+            print("Run 'rebuild' to fold the reinstated docs into the graph.")
+        return 0
+
+    # --- audit / prune path
     documents = corpus.load(config.CORPUS_FILE)
     keep = []
     drop = []
     for doc in documents:
-        src = doc.get("source", "")
-        # Always keep Claude syntheses (operator-authored summary docs)
-        # and SBIR/J-Book records (those went through their own AI gate
-        # at ingest time).
-        meta = doc.get("metadata") or {}
-        if (src == "Claude synthesis" or meta.get("synthesis")
-                or meta.get("data_source") in ("SBIR", "J-Book")):
+        if _is_protected_doc(doc):
             keep.append(doc)
             continue
         text = (doc.get("title", "") + " "
@@ -567,6 +722,10 @@ def cmd_audit_corpus_ai(args):
     print("  would keep:       %d" % len(keep))
     print("  would drop:       %d  (%.0f%%)"
           % (len(drop), 100.0 * len(drop) / max(1, len(documents))))
+    archive_count = sum(1 for _ in _load_archive())
+    if archive_count:
+        print("  already archived: %d  (use --reinstate to re-evaluate)"
+              % archive_count)
     print()
     if by_src:
         print("Drop counts per source:")
@@ -579,16 +738,20 @@ def cmd_audit_corpus_ai(args):
                              (d.get("title", "") or "")[:80]))
     if not args.prune:
         print()
-        print("(audit only -- pass --prune to rewrite corpus/documents.jsonl)")
+        print("(audit only -- pass --prune to MOVE drops to "
+              "corpus/archived.jsonl)")
         return 0
     if not drop:
         print("Nothing to drop -- corpus is already clean.")
         return 0
+    # Move (not discard): archive first, then rewrite corpus.
+    _append_archive(drop, reason="ai_filter")
     corpus.save(config.CORPUS_FILE, keep)
     print()
-    print("Pruned %d doc(s). Corpus now %d docs."
+    print("Pruned %d doc(s) -> corpus/archived.jsonl. Corpus now %d docs."
           % (len(drop), len(keep)))
-    print("Run 'rebuild' to regenerate the graph from the pruned corpus.")
+    print("Archive total: %d doc(s). Run 'rebuild' to regenerate the graph."
+          % (archive_count + len(drop)))
     return 0
 
 
@@ -1002,6 +1165,20 @@ def build_parser():
     serve_p.add_argument("--port", type=int, default=8000)
     serve_p.set_defaults(func=cmd_serve)
 
+    history_p = sub.add_parser(
+        "history",
+        help="show the daily ingest history table (timing, counts, errors)",
+    )
+    history_p.add_argument(
+        "--limit", type=int, default=20,
+        help="how many most-recent runs to show (default 20, 0 = all)",
+    )
+    history_p.add_argument(
+        "--full", action="store_true",
+        help="also print the per-feed scorecard for each run",
+    )
+    history_p.set_defaults(func=cmd_history)
+
     audit_p = sub.add_parser(
         "audit-corpus-ai",
         help="scan the corpus for docs that don't pass the AI relevance "
@@ -1009,8 +1186,15 @@ def build_parser():
     )
     audit_p.add_argument(
         "--prune", action="store_true",
-        help="rewrite corpus/documents.jsonl in place, keeping only the "
-             "AI-relevant docs + syntheses + SBIR/J-Book records",
+        help="MOVE non-AI docs from corpus/documents.jsonl to "
+             "corpus/archived.jsonl (preserved, not discarded). "
+             "Syntheses and SBIR/J-Book records are always kept.",
+    )
+    audit_p.add_argument(
+        "--reinstate", action="store_true",
+        help="re-evaluate corpus/archived.jsonl against the current AI "
+             "filter and pull back into the active corpus any archived "
+             "docs that now pass. Use after tuning ai_terms.py.",
     )
     audit_p.set_defaults(func=cmd_audit_corpus_ai)
 

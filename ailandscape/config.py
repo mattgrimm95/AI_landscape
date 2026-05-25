@@ -11,6 +11,15 @@ CORPUS_DIR = ROOT / "corpus"
 # documents. Both SQLite databases are derived caches rebuilt from this file.
 CORPUS_FILE = CORPUS_DIR / "documents.jsonl"
 
+# Sidecar archive for documents pruned out of the active corpus (e.g. by
+# `audit-corpus-ai --prune` when they fail the AI relevance gate). Same
+# JSONL format as CORPUS_FILE with two extra fields per record:
+# `archived_at` (ISO timestamp) and `archived_reason` (short string).
+# NOT read by NER / reconcile / any analysis path -- it's a preservation
+# layer so a future filter tweak can re-ingest historical docs via
+# `audit-corpus-ai --reinstate` without re-scraping.
+CORPUS_ARCHIVE_FILE = CORPUS_DIR / "archived.jsonl"
+
 NER_OUTPUT_DB = DATA_DIR / "ner_output_log.db"
 KG_DB = DATA_DIR / "knowledge_graph.db"
 
@@ -27,9 +36,13 @@ REVIEW_FILE = ROOT / "review.json"
 # gitignored data/ directory so addresses are never pushed.
 EMAIL_RECIPIENTS_FILE = DATA_DIR / "email_recipients.txt"
 
-# Append-only log of pipeline runs (timing + counts), used by the overview
-# report. Derived data — lives under the gitignored data/ directory.
-RUN_HISTORY_FILE = DATA_DIR / "run_history.jsonl"
+# Append-only log of pipeline runs (timing, counts, per-feed scorecards,
+# errors, quality KPIs — one JSON line per run). Lives under snapshots/
+# (tracked, not gitignored) so the daily commit carries the run record
+# and the operator can audit ingestion health over time from any clone.
+# A legacy data/run_history.jsonl is auto-migrated on first read.
+RUN_HISTORY_FILE = SNAPSHOT_DIR / "run-history.jsonl"
+_LEGACY_RUN_HISTORY = DATA_DIR / "run_history.jsonl"
 
 # Default output path for the interactive graph visualization (derived).
 GRAPH_HTML = DATA_DIR / "knowledge_graph.html"

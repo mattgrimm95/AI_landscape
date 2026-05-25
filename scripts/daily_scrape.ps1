@@ -59,20 +59,19 @@ if (Test-Path $snapshotPath) {
     }
 }
 
-# 2. Commit and push: the corpus AND any new synthesis snapshot.
-#    Staging snapshots/syntheses/ alongside the corpus means a daily
-#    commit carries today's read for visitors to pull, but only if
-#    something actually changed (git status --porcelain rejects empty
-#    diffs so a key-less run that adds nothing produces no commit).
-& $git add corpus/documents.jsonl snapshots/syntheses
-$changed = & $git status --porcelain corpus/documents.jsonl snapshots/syntheses
+# 2. Commit and push: the corpus, any new synthesis snapshot, the
+#    archived-doc sidecar (audit-corpus-ai may have moved drops there),
+#    and the per-run ingest history line so the operator can audit
+#    pipeline health from any clone via `ailandscape history`.
+& $git add corpus/documents.jsonl corpus/archived.jsonl snapshots/syntheses snapshots/run-history.jsonl
+$changed = & $git status --porcelain corpus/documents.jsonl corpus/archived.jsonl snapshots/syntheses snapshots/run-history.jsonl
 if ($changed) {
-    $msg = "Daily scrape: corpus + synthesis update $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
+    $msg = "Daily scrape: corpus + synthesis + history update $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
     Write-Log ((& $git -c user.email='' commit -m $msg 2>&1 | Out-String).TrimEnd())
     Write-Log ((& $git push origin main 2>&1 | Out-String).TrimEnd())
-    Write-Log 'committed and pushed corpus + synthesis update'
+    Write-Log 'committed and pushed corpus + synthesis + history update'
 } else {
-    Write-Log 'no new articles or snapshots; nothing to commit'
+    Write-Log 'no new articles, snapshots, or history; nothing to commit'
 }
 
 Write-Log "=== $(Get-Date -Format 'HH:mm:ss')  done ===`r`n"
