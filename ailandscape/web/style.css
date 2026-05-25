@@ -216,6 +216,51 @@ ul.articles li .src { color: var(--muted); font-size: 11px; margin-top: 1px; }
 }
 #message.show { opacity: 1; }
 
+/* ---- first-view tidying ----
+ * The Search panel is the navigation anchor of the first view, so its
+ * primary filter (entity type) sits right alongside the search box and
+ * the rarely-used filters tuck behind a collapsible. The Story tours
+ * panel is similarly collapsed so the always-visible content is just
+ * the graph + Start here + Search + entity type. */
+.primary-filter {
+  margin-top: 8px;
+}
+.search-filters-wrap {
+  margin: 6px 0 4px;
+}
+.search-filters-wrap > summary.muted-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 0;
+}
+.search-filters-wrap > summary.muted-summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.search-filters-wrap[open] > summary.muted-summary::before {
+  transform: rotate(90deg);
+}
+.collapsible-panel > details > summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 4px;
+}
+.collapsible-panel > details > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s;
+  color: var(--muted);
+}
+.collapsible-panel > details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.collapsible-panel > details > summary h2 {
+  margin-bottom: 0 !important;
+}
+
 /* ---- topbar / modal ---- */
 #topbar-right { display: flex; align-items: center; gap: 12px; }
 #open-dashboard { flex: none; padding: 5px 12px; }
@@ -605,6 +650,17 @@ details.pair-filter label { font-size: 12px; }
 /* ---- sidebar groups (EXPLORE / TRACK / TOOLS) ---- */
 .sidebar-group {
   margin-bottom: 14px;
+}
+/* Force-hide non-summary children when a sidebar group is collapsed.
+   The browser's native details collapsing doesn't reliably apply through
+   nested sections in every engine, so this is the belt-and-suspenders
+   rule that guarantees Track/Tools take zero vertical space when closed. */
+.sidebar-group:not([open]) > *:not(summary) {
+  display: none !important;
+}
+/* Same for the per-panel collapsibles inside Explore (Story tours). */
+.collapsible-panel > details:not([open]) > *:not(summary) {
+  display: none !important;
 }
 .sidebar-group > summary {
   cursor: pointer;

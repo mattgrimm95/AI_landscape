@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Landscape — Knowledge Graph</title>
-  <link rel="stylesheet" href="style.css?v=20260525p" />
+  <link rel="stylesheet" href="style.css?v=20260525q" />
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/layout-base/layout-base.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cose-base/cose-base.js"></script>
@@ -63,39 +63,49 @@
           <div id="starter-grid" class="starter-grid"></div>
         </section>
 
-        <section class="panel" id="tours-panel">
-          <h2>Story tours</h2>
-          <div id="tour-list" class="tour-list">loading…</div>
+        <section class="panel collapsible-panel" id="tours-panel">
+          <details>
+            <summary><h2 style="display:inline">Story tours</h2></summary>
+            <div id="tour-list" class="tour-list">loading…</div>
+          </details>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="search-panel">
           <h2>Search</h2>
           <input id="search" type="search" placeholder="Find an entity…"
                  autocomplete="off" />
-          <div class="search-filters">
-            <label>Since
-              <input id="search-since" type="date" />
-            </label>
-            <label>Relation
-              <select id="search-relation">
-                <option value="">any</option>
-                <option value="leads">leads</option>
-                <option value="part_of">part of</option>
-                <option value="located_in">located in</option>
-                <option value="acquires">acquires</option>
-                <option value="partners_with">partners with</option>
-                <option value="awards_contract">awards contract</option>
-                <option value="develops">develops</option>
-                <option value="supplies">supplies</option>
-              </select>
-            </label>
-          </div>
+          <label class="primary-filter">Show entity type
+            <select id="f-type"><option value="">all types</option></select>
+          </label>
+          <details class="search-filters-wrap">
+            <summary class="muted-summary">More search filters</summary>
+            <div class="search-filters">
+              <label>Since
+                <input id="search-since" type="date" />
+              </label>
+              <label>Relation
+                <select id="search-relation">
+                  <option value="">any</option>
+                  <option value="leads">leads</option>
+                  <option value="part_of">part of</option>
+                  <option value="located_in">located in</option>
+                  <option value="acquires">acquires</option>
+                  <option value="partners_with">partners with</option>
+                  <option value="awards_contract">awards contract</option>
+                  <option value="develops">develops</option>
+                  <option value="supplies">supplies</option>
+                </select>
+              </label>
+            </div>
+          </details>
           <ul id="search-results"></ul>
         </section>
       </details>
 
-      <!-- TRACK — what's moving right now -->
-      <details class="sidebar-group" id="group-track" open>
+      <!-- TRACK — what's moving right now. Collapsed by default so the
+           first view keeps the focus on the graph + Search + entity-type
+           filter; open it to see What changed / Connection / Overview. -->
+      <details class="sidebar-group" id="group-track">
         <summary><span class="group-title">Track</span><span class="group-hint">what's moving</span></summary>
 
         <section class="panel" id="recent-panel">
@@ -124,9 +134,7 @@
 
         <section class="panel">
           <h2>View</h2>
-          <label>Entity type
-            <select id="f-type"><option value="">all types</option></select>
-          </label>
+          <p class="mini-spark-note" style="margin:0 0 8px 0">Entity-type filter is in the Search panel above. The controls here are for fine-tuning the graph cut.</p>
           <label>Min mentions
             <input id="f-min-mentions" type="number" value="0" min="0" />
           </label>
@@ -242,6 +250,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260525p"></script>
+  <script src="app.js?v=20260525q"></script>
 </body>
 </html>
