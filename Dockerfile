@@ -62,7 +62,9 @@ COPY --chown=ail:ail ailandscape/ ./ailandscape/
 COPY --chown=ail:ail scripts/ ./scripts/
 COPY --chown=ail:ail corpus/ ./corpus/
 COPY --chown=ail:ail snapshots/ ./snapshots/
-COPY --chown=ail:ail corrections.json review.json ./
+# Glob patterns so a missing optional file (e.g. corrections.json hasn't
+# been initialised in a fresh clone) doesn't break the build.
+COPY --chown=ail:ail corrections.json* review.json* ./
 COPY --chown=ail:ail requirements.txt README.md LLM_INDEX.md ./
 
 # Create the data/ dir (mounted at runtime) and hand ownership to the
