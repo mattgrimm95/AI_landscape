@@ -35,46 +35,13 @@ API_URL = "https://api.www.sbir.gov/public/api/awards"
 _PAGE_SIZE = 100
 MAX_AI_AWARDS = 150
 
-# Award text that marks a project as AI-related. Matched case-insensitively
-# with word boundaries. The list is intentionally broad — it spans core
-# AI/ML, model families, perception, data science, and embodied-AI
-# robotics — because the API offers no keyword search, so this filter is
-# the only AI gate.
-_AI_TERMS = re.compile(
-    r"\b("
-    # core AI / machine learning
-    r"artificial intelligence|machine intelligence|machine learning|"
-    r"deep learning|deep neural|neural net(work)?|"
-    r"reinforcement learning|supervised learning|unsupervised learning|"
-    r"transfer learning|federated learning|"
-    # model families / generative
-    r"generative (ai|model|adversarial)|language model|foundation model|"
-    r"transformer model|diffusion model|"
-    r"ml model|ai/ml|ai-(enabled|powered|driven)|ml-based|"
-    # perception / language
-    r"computer vision|machine vision|image (recognition|classification)|"
-    r"object (detection|recognition)|scene understanding|"
-    r"speech recognition|natural language|pattern recognition|"
-    r"anomaly detection|"
-    # data science / analytics
-    r"data science|data analytics|data mining|predictive analytics|"
-    r"predictive model|"
-    # embodied AI / robotics
-    r"robots?|robotics?|embodied (ai|intelligence|agent)|"
-    r"imitation learning|motion planning|path planning|"
-    r"dexterous manipulation|visual servoing|sensorimotor|"
-    r"sim-to-real|sim2real|simultaneous localization|quadruped|"
-    # other AI
-    r"autonom(y|ous)|cognitive computing|expert system"
-    r")\b",
-    re.IGNORECASE,
-)
-
-# Strong AI acronyms, matched case-sensitively as bare uppercase tokens so
-# they never fire on lowercase fragments inside ordinary words ("ai" in
-# "maintain"/"available", "ml" in "HTML"). SLAM = simultaneous localization
-# and mapping, a core embodied-AI / robotics technique.
-_AI_ACRONYMS = re.compile(r"\b(AI|ML|LLM|NLP|SLAM)\b")
+# The AI-relevance lexicon lives in ailandscape/ai_terms.py — one source
+# of truth shared with enrich.py and pipeline.py so a single term-list
+# tweak lifts every gate at once. The legacy names _AI_TERMS / _AI_ACRONYMS
+# are re-exported here so older call sites + tests keep working unchanged.
+from . import ai_terms  # noqa: E402  (intentional: after the module docstring)
+_AI_TERMS = ai_terms.AI_TERMS
+_AI_ACRONYMS = ai_terms.AI_ACRONYMS
 
 
 class SBIRError(Exception):

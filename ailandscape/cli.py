@@ -38,9 +38,9 @@ import sys
 import tempfile
 
 from . import (
-    briefing, config, corpus, emailer, enrich, feed_discovery, pipeline,
-    reconcile, report, review, scraper, synthesis, synthesis_cache, trends,
-    visualize,
+    ai_terms, briefing, config, corpus, emailer, enrich, feed_discovery,
+    pipeline, reconcile, report, review, scraper, synthesis, synthesis_cache,
+    trends, visualize,
 )
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
@@ -529,6 +529,69 @@ def _ask_yes(force_yes, prompt):
     return answer in ("y", "yes")
 
 
+def cmd_audit_corpus_ai(args):
+    """Scan the corpus for documents that don't pass the AI relevance bar.
+
+    Prints a per-source breakdown of how many docs would fail the gate
+    plus the first 20 titles. With --prune, rewrites corpus/documents.jsonl
+    in place, keeping only AI-relevant docs (synthesis docs and SBIR awards
+    are always kept). The pruned-out docs' content_hashes are NOT cached
+    anywhere so a future re-scrape may re-attempt them; that's a feature,
+    not a bug — the bar might change.
+    """
+    config.ensure_dirs()
+    documents = corpus.load(config.CORPUS_FILE)
+    keep = []
+    drop = []
+    for doc in documents:
+        src = doc.get("source", "")
+        # Always keep Claude syntheses (operator-authored summary docs)
+        # and SBIR/J-Book records (those went through their own AI gate
+        # at ingest time).
+        meta = doc.get("metadata") or {}
+        if (src == "Claude synthesis" or meta.get("synthesis")
+                or meta.get("data_source") in ("SBIR", "J-Book")):
+            keep.append(doc)
+            continue
+        text = (doc.get("title", "") + " "
+                + (doc.get("raw_text", "") or ""))
+        if ai_terms.is_ai_relevant(text):
+            keep.append(doc)
+        else:
+            drop.append(doc)
+
+    import collections
+    by_src = collections.Counter(d.get("source", "?") for d in drop)
+    print("Corpus audit (AI gate)")
+    print("  total docs:       %d" % len(documents))
+    print("  would keep:       %d" % len(keep))
+    print("  would drop:       %d  (%.0f%%)"
+          % (len(drop), 100.0 * len(drop) / max(1, len(documents))))
+    print()
+    if by_src:
+        print("Drop counts per source:")
+        for src, n in by_src.most_common():
+            print("  %-30s %d" % (src[:30], n))
+    print()
+    print("First 20 titles that would drop:")
+    for d in drop[:20]:
+        print("  [%s] %s" % (d.get("source", "")[:18],
+                             (d.get("title", "") or "")[:80]))
+    if not args.prune:
+        print()
+        print("(audit only -- pass --prune to rewrite corpus/documents.jsonl)")
+        return 0
+    if not drop:
+        print("Nothing to drop -- corpus is already clean.")
+        return 0
+    corpus.save(config.CORPUS_FILE, keep)
+    print()
+    print("Pruned %d doc(s). Corpus now %d docs."
+          % (len(drop), len(keep)))
+    print("Run 'rebuild' to regenerate the graph from the pruned corpus.")
+    return 0
+
+
 def cmd_synthesize_daily(args):
     """Generate today's hype + briefing-narrative sidecar snapshot.
 
@@ -938,6 +1001,18 @@ def build_parser():
     serve_p = sub.add_parser("serve", help="run the interactive web app")
     serve_p.add_argument("--port", type=int, default=8000)
     serve_p.set_defaults(func=cmd_serve)
+
+    audit_p = sub.add_parser(
+        "audit-corpus-ai",
+        help="scan the corpus for docs that don't pass the AI relevance "
+             "bar (with --prune, rewrite the corpus dropping them)",
+    )
+    audit_p.add_argument(
+        "--prune", action="store_true",
+        help="rewrite corpus/documents.jsonl in place, keeping only the "
+             "AI-relevant docs + syntheses + SBIR/J-Book records",
+    )
+    audit_p.set_defaults(func=cmd_audit_corpus_ai)
 
     synth_p = sub.add_parser(
         "synthesize-daily",

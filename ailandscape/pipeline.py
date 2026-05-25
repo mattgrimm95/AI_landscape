@@ -12,8 +12,8 @@ import os
 import time
 
 from . import (
-    briefing, config, corpus, jbooks, ner, reconcile, sbir, scraper,
-    synthesis, synthesis_cache,
+    ai_terms, briefing, config, corpus, jbooks, ner, reconcile, sbir,
+    scraper, synthesis, synthesis_cache,
 )
 from .storage_kg import KnowledgeGraphStore
 
@@ -83,11 +83,20 @@ def scrape_into_corpus(feeds, corpus_path, log=None):
     added_total = 0
     extracted_total = 0
     fetched_total = 0
+    filtered_total = 0
     for feed in feeds:
         name = feed.get("name") or "(unnamed)"
+        # A feed flagged ai_only=False is curated by the publisher (MIT
+        # News - AI, IEEE Spectrum - AI, etc.) -- skip the per-article AI
+        # filter so a legitimate AI article that happens to omit the
+        # keyword in the body still lands. The default is True (filter
+        # on) because the corpus is scoped to AI national-security
+        # reporting and off-topic content dilutes the graph.
+        apply_ai_filter = feed.get("ai_only", True)
         stats = feed_stats.setdefault(
             name,
-            {"fetched": 0, "added": 0, "extracted": 0, "error": ""},
+            {"fetched": 0, "added": 0, "extracted": 0,
+             "filtered_non_ai": 0, "error": ""},
         )
         try:
             feed_articles = scraper.fetch_feed(feed)
@@ -110,6 +119,18 @@ def scrape_into_corpus(feeds, corpus_path, log=None):
             if article["raw_text"] != feed_text:
                 stats["extracted"] += 1
                 extracted_total += 1
+            # AI-relevance filter (after extraction so we see the full body).
+            # Mark the article as known *before* the filter check so a
+            # rejected article doesn't get re-fetched next run.
+            if apply_ai_filter:
+                check_text = (article.get("title", "") + " "
+                              + (article.get("raw_text", "") or ""))
+                if not ai_terms.is_ai_relevant(check_text):
+                    stats["filtered_non_ai"] += 1
+                    filtered_total += 1
+                    log("filter (non-AI): %s" % (article.get("title", "") or article.get("url", ""))[:70])
+                    time.sleep(ARTICLE_FETCH_DELAY)
+                    continue
             corpus.append(corpus_path, make_record(article))
             stats["added"] += 1
             added_total += 1
@@ -119,6 +140,7 @@ def scrape_into_corpus(feeds, corpus_path, log=None):
         "fetched": fetched_total,
         "added": added_total,
         "extracted": extracted_total,
+        "filtered_non_ai": filtered_total,
         "feeds": feed_stats,
     }
 

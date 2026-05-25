@@ -51,17 +51,17 @@ URL so re-running with the same body is a no-op too.
 import datetime
 import hashlib
 
-from . import corpus, sbir, scraper
+from . import ai_terms, corpus, scraper
 
 
 # ---- AI-relevance gate -----------------------------------------------------
 #
 # The whole project is scoped to AI national-security reporting; an enrich
 # run that quietly drops non-AI articles into the corpus would dilute that
-# focus and pollute the graph with off-topic entities. The same regex SBIR
-# uses to filter award abstracts is reused here so the bar is consistent
-# across all data sources -- and so a single tweak to sbir._AI_TERMS lifts
-# both gates at once.
+# focus and pollute the graph with off-topic entities. The lexicon lives
+# in ailandscape/ai_terms.py and is shared with SBIR and pipeline scrape
+# filters so the bar is consistent across all data sources -- one
+# term-list tweak lifts every gate at once.
 #
 # Plan-level (not per-article) granularity: an enrichment plan is about
 # one entity / topic, and the synthesis is the operator's canonical
@@ -74,15 +74,9 @@ from . import corpus, sbir, scraper
 
 
 def _is_ai_relevant(text):
-    """True if `text` contains an AI / ML / autonomy term recognised by the
-    same regex SBIR uses to filter award abstracts."""
-    if not text:
-        return False
-    text_str = str(text)
-    return bool(
-        sbir._AI_TERMS.search(text_str.lower())
-        or sbir._AI_ACRONYMS.search(text_str)
-    )
+    """True if ``text`` contains an AI/ML/autonomy term — delegates to the
+    shared ``ai_terms.is_ai_relevant`` so the bar matches every other gate."""
+    return ai_terms.is_ai_relevant(text)
 
 
 def plan_ai_signal(plan):
@@ -122,16 +116,8 @@ def plan_ai_signal(plan):
 
 
 def _ai_terms_in(text):
-    """Distinct AI term hits in `text`, for diagnostic logging."""
-    if not text:
-        return []
-    text_str = str(text)
-    found = set()
-    for m in sbir._AI_TERMS.finditer(text_str.lower()):
-        found.add(m.group(0))
-    for m in sbir._AI_ACRONYMS.finditer(text_str):
-        found.add(m.group(0))
-    return sorted(found)
+    """Distinct AI term hits in ``text``, for diagnostic logging."""
+    return ai_terms.ai_terms_in(text)
 
 
 def _utcnow_iso():
