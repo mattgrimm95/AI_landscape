@@ -76,6 +76,10 @@ try {
   LAYOUT_NAME = "cose";
 }
 
+// No optional Cytoscape extensions — every modernization (hover halo,
+// tooltip, right-click menu) is pure DOM/CSS/JS below so a third-party
+// CDN outage can't break the graph.
+
 function layoutOptions(name) {
   if (name === "fcose") {
     return {
@@ -235,27 +239,42 @@ const CY_STYLE = [
     selector: "node",
     style: {
       "background-color": "data(color)",
+      // Tiny dark border softens the edge against the dark canvas.
+      "border-width": 1.2,
+      "border-color": "#0a0f1a",
+      "border-opacity": 0.6,
       width: "data(size)",
       height: "data(size)",
       label: "data(label)",
       color: "#eef2f7",
+      "font-family": "Inter, system-ui, sans-serif",
+      "font-weight": 500,
       // Prominent nodes get larger labels; small ones hide when zoomed out
       // so the default view stays uncluttered.
-      "font-size": "mapData(size, 16, 72, 7, 19)",
+      "font-size": "mapData(size, 16, 72, 8, 20)",
       "min-zoomed-font-size": 11,
-      "text-outline-color": "#11151c",
-      "text-outline-width": 2.4,
+      "text-outline-color": "#0a0f1a",
+      "text-outline-width": 3,    // a touch thicker for legibility on dark bg
+      "text-outline-opacity": 0.9,
       "text-valign": "bottom",
-      "text-margin-y": 3,
+      "text-margin-y": 4,
+      // Soft "lit" feel via per-node shadow.
+      "overlay-opacity": 0,
+      "shadow-blur": 8,
+      "shadow-color": "#000",
+      "shadow-opacity": 0.35,
+      "shadow-offset-x": 0,
+      "shadow-offset-y": 1,
     },
   },
   {
     selector: "edge",
     style: {
       width: "data(w)",
-      "line-color": "#36425a",
+      "line-color": "#3a4761",
       "curve-style": "bezier",
-      opacity: 0.3,
+      "line-opacity": 0.4,
+      opacity: 0.55,
     },
   },
   {
@@ -263,27 +282,80 @@ const CY_STYLE = [
     selector: 'edge[relation != "co_occurs_with"]',
     style: {
       width: 2.6,
-      "line-color": "#5e9bff",
+      "line-color": "#3b82f6",
       opacity: 0.95,
+      "line-opacity": 0.85,
       "target-arrow-shape": "triangle",
-      "target-arrow-color": "#5e9bff",
-      "arrow-scale": 1.1,
+      "target-arrow-color": "#3b82f6",
+      "arrow-scale": 1.15,
       label: "data(relLabel)",
+      "font-family": "Inter, system-ui, sans-serif",
+      "font-weight": 500,
       "font-size": 9,
       "min-zoomed-font-size": 9,
-      color: "#a8c8ff",
+      color: "#a8c4ff",
       "text-rotation": "autorotate",
-      "text-background-color": "#11151c",
-      "text-background-opacity": 0.78,
-      "text-background-padding": 2,
+      "text-background-color": "#0a0f1a",
+      "text-background-opacity": 0.85,
+      "text-background-padding": 3,
+      "text-background-shape": "roundrectangle",
     },
   },
-  { selector: "node:selected", style: { "border-width": 3, "border-color": "#fff" } },
+  // Selected node: clear accent ring.
+  { selector: "node:selected", style: { "border-width": 3, "border-color": "#3b82f6", "border-opacity": 1 } },
+  // .dim is the existing class used by selectNode -> highlightNeighborhood.
   { selector: ".dim", style: { opacity: 0.1, "text-opacity": 0.1 } },
+  // ---- hover halo: triggered transiently on mouseover ----
+  // The hovered node lifts: stronger shadow, brighter border, full opacity.
+  {
+    selector: "node.hovered",
+    style: {
+      "border-width": 3,
+      "border-color": "#3b82f6",
+      "border-opacity": 1,
+      "shadow-blur": 22,
+      "shadow-opacity": 0.65,
+      "shadow-color": "#3b82f6",
+      "z-index": 999,
+    },
+  },
+  // The hovered node's neighbors brighten too — same affordance as the
+  // selection highlight but transient.
+  {
+    selector: "node.neighbor-hovered",
+    style: {
+      "border-width": 2,
+      "border-color": "#fff",
+      "border-opacity": 0.7,
+      "shadow-blur": 14,
+      "shadow-opacity": 0.45,
+      "z-index": 100,
+    },
+  },
+  // Edges connected to the hovered node ride at full opacity + slightly
+  // thicker so the relationship structure pops.
+  {
+    selector: "edge.hover-edge",
+    style: {
+      opacity: 1,
+      "line-opacity": 1,
+      width: "mapData(w, 0.6, 5.6, 1.5, 4.5)",
+      "z-index": 50,
+    },
+  },
+  // Everything NOT in the hovered neighborhood fades way back.
+  {
+    selector: ".fade",
+    style: { opacity: 0.12, "text-opacity": 0.12 },
+  },
 ];
 
 function renderGraph(graph) {
+  // Hide any leftover custom chrome before destroying the cy instance.
+  _hideHoverTip();
+  _hideActionMenu();
   if (cy) cy.destroy();
+
   const build = (layoutName) =>
     cytoscape({
       container: $("cy"),
@@ -305,14 +377,15 @@ function renderGraph(graph) {
   // outside renderGraph (e.g. focus animations from the detail panel) reach
   // the live graph without threading the reference through every call.
   window.cy = cy;
+
+  // ---- core interactions ----
   cy.on("tap", "node", (evt) => selectNode(evt.target.id()));
   cy.on("tap", "edge", (evt) => {
     const ev = evt.target.data("evidence");
     if (ev) setMessage("“" + ev + "”");
   });
-  // Hover an edge to see what its relation means, in plain language. This
-  // lifts the glossary out of the Guide modal so a learner discovers it
-  // mid-exploration without a context switch.
+  // Edge hover: keep the bottom-right toast (it's a glossary lookup, not
+  // an entity card, and edges are too thin for an anchored popper).
   cy.on("mouseover", "edge", (evt) => {
     const relation = evt.target.data("relation") || "co_occurs_with";
     const meaning = RELATION_MEANING[relation];
@@ -329,6 +402,173 @@ function renderGraph(graph) {
   // dispatch is debounced so a single scroll-burst doesn't fire a hundred
   // re-fetches.
   cy.on("zoom", debouncedMaybeDensify);
+
+  // ---- hover halo: brighten the hovered node + its neighbors ----
+  // Adds .hovered to the node, .neighbor-hovered to its closed-neighborhood
+  // nodes, .hover-edge to incident edges, and .fade to everything else.
+  // All classes removed on mouseout. The .dim class used by sticky
+  // selection is untouched.
+  cy.on("mouseover", "node", (evt) => {
+    const n = evt.target;
+    const nb = n.openNeighborhood().nodes();
+    const edges = n.connectedEdges();
+    cy.batch(() => {
+      cy.elements().addClass("fade");
+      n.removeClass("fade").addClass("hovered");
+      nb.removeClass("fade").addClass("neighbor-hovered");
+      edges.removeClass("fade").addClass("hover-edge");
+    });
+  });
+  cy.on("mouseout", "node", () => {
+    cy.batch(() => {
+      cy.elements().removeClass("hovered neighbor-hovered hover-edge fade");
+    });
+  });
+
+  // ---- custom hover tooltip ----
+  // Pure-DOM: one #cy-tooltip div re-positioned + re-populated on each
+  // node mouseover. No third-party CDN dependency. The tooltip floats
+  // just above the hovered node and follows it if the node moves
+  // (e.g. layout settle). Hidden on mouseout.
+  cy.on("mouseover", "node", (evt) => _showHoverTip(evt.target));
+  cy.on("mouseout", "node", () => _hideHoverTip());
+  cy.on("pan zoom", () => { _hideHoverTip(); _hideActionMenu(); });
+
+  // ---- custom right-click action menu ----
+  // Pure-DOM: a stacked menu positioned at the right-click point with
+  // Focus / Dossier / Show detail / Ignore / Merge. Hidden on Escape,
+  // on a click outside, on pan/zoom, on a left-click anywhere.
+  cy.on("cxttap", "node", (evt) => _showActionMenu(evt.target,
+    evt.renderedPosition || evt.originalEvent));
+  cy.on("tap", () => _hideActionMenu());
+}
+
+// Custom hover tooltip — no third-party libs. Reposition the single
+// #cy-tooltip div over the hovered node's screen-space center and
+// fade it in. The node's renderedBoundingBox is already in #cy's
+// coordinate space, so positioning is one transform.
+function _showHoverTip(node) {
+  const tip = $("cy-tooltip");
+  if (!tip || !cy) return;
+  const data = node.data();
+  const colorChip = data.color || "#9aa0a6";
+  const neighborCount = node.degree();
+  tip.innerHTML =
+    '<div class="ail-tip-title">' + escapeHtml(data.label || "") + "</div>" +
+    '<div class="ail-tip-meta">' +
+    '<span class="ail-tip-badge" style="background:' + colorChip + '">' +
+    escapeHtml(data.type || "?") + "</span>" +
+    Number(data.mentions || 0) + " mentions · " +
+    Number(data.documents || 0) + " docs · " +
+    neighborCount + " connections" +
+    "</div>" +
+    '<div class="ail-tip-hint">click for detail · right-click for actions</div>';
+  const bb = node.renderedBoundingBox();
+  // Anchor at node's top-center (the ::after arrow lives at the
+  // tooltip's bottom-center -- CSS transform translate(-50%, -100%)
+  // already handles the offset).
+  tip.style.left = ((bb.x1 + bb.x2) / 2) + "px";
+  tip.style.top = bb.y1 + "px";
+  tip.hidden = false;
+  // Force a layout flush so the opacity transition actually animates.
+  // Reading offsetWidth is the cheapest way; lint-friendly idiom.
+  void tip.offsetWidth;
+  tip.classList.add("show");
+}
+
+function _hideHoverTip() {
+  const tip = $("cy-tooltip");
+  if (!tip) return;
+  tip.classList.remove("show");
+  // Hide after the fade-out completes so the next show transition starts
+  // from opacity:0 cleanly.
+  setTimeout(() => { if (!tip.classList.contains("show")) tip.hidden = true; }, 140);
+}
+
+// Custom right-click action menu. The element already lives in the DOM
+// (#cy-actions) with its buttons predefined; we show/hide + position
+// it on demand and dispatch by data-act attribute.
+let _cyActionsWired = false;
+
+function _showActionMenu(node, pos) {
+  const menu = $("cy-actions");
+  if (!menu) return;
+  _wireActionMenu();
+  // Position relative to the #main container so the absolute-positioned
+  // menu sits where the user clicked. pos.x/y are relative to the cy
+  // container which IS #main (cytoscape sets it to absolute inset:0).
+  const x = (pos && typeof pos.x === "number") ? pos.x : (pos && pos.offsetX) || 0;
+  const y = (pos && typeof pos.y === "number") ? pos.y : (pos && pos.offsetY) || 0;
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+  menu.dataset.nodeId = node.id();
+  menu.dataset.nodeLabel = node.data("label") || "";
+  // Optional header showing what was clicked.
+  menu.querySelector(".cy-actions-header")?.remove();
+  const header = document.createElement("div");
+  header.className = "cy-actions-header";
+  header.textContent = node.data("label") || "(unnamed)";
+  menu.prepend(header);
+  menu.hidden = false;
+  _hideHoverTip();
+}
+
+function _hideActionMenu() {
+  const menu = $("cy-actions");
+  if (menu) menu.hidden = true;
+}
+
+// One-time delegated click wiring on the menu buttons. The data-act
+// attribute on each button selects which action to take; the node is
+// looked up via menu.dataset.nodeId so we don't capture stale refs.
+function _wireActionMenu() {
+  if (_cyActionsWired) return;
+  const menu = $("cy-actions");
+  if (!menu) return;
+  _cyActionsWired = true;
+  menu.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = menu.dataset.nodeId;
+    const label = menu.dataset.nodeLabel;
+    _hideActionMenu();
+    if (!id) return;
+    switch (btn.dataset.act) {
+      case "focus":
+        loadGraph(Object.assign(readFilters(), { focus: label }));
+        break;
+      case "dossier":
+        showDossier(id);
+        break;
+      case "select":
+        selectNode(id);
+        break;
+      case "ignore":
+        if (confirm('Ignore "' + label + '"? It will be dropped from the graph.')) {
+          applyCorrection("ignore", [label]);
+        }
+        break;
+      case "merge": {
+        const target = prompt('Merge "' + label + '" into which entity?');
+        if (target && target.trim()) applyCorrection("merge", [label, target.trim()]);
+        break;
+      }
+    }
+  });
+  // Esc dismisses; click outside dismisses (handled by cy "tap" too).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") _hideActionMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (!menu.contains(e.target) && !menu.hidden) {
+      // Only dismiss for clicks outside the menu AND outside the cy
+      // container's right-click region. cy "tap" already covers left-
+      // clicks on the canvas.
+      const cyEl = $("cy");
+      if (cyEl && cyEl.contains(e.target)) return;
+      _hideActionMenu();
+    }
+  });
 }
 
 let densifyTimer = null;

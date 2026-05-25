@@ -1,20 +1,40 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Inter — loaded with display=swap so the page is never blocked on the
+   font. system-ui fallback so the first paint still reads correctly. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
 :root {
-  --bg: #11151c;
-  --panel: #1b2230;
-  --panel-2: #232c3d;
-  --line: #313c52;
-  --text: #e8ecf2;
-  --muted: #93a0b4;
-  --accent: #4f83cc;
+  /* Deeper, cleaner base palette. Background reads as "near-black with a
+     hint of blue" (~slate-950), one notch darker than before. Panels are
+     subtly elevated so the chrome feels layered, not flat. */
+  --bg: #0a0f1a;
+  --bg-soft: #0d1424;
+  --panel: #131a2b;
+  --panel-2: #1a2236;
+  --line: #2a3753;
+  --text: #e8ecf5;
+  --muted: #94a3c0;
+
+  /* Accent moved to a brighter cool blue (~Tailwind blue-500) so it
+     reads as a modern UI primary, not a 2018 link blue. */
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.18);
+
+  /* Soft drop-shadow tokens reused on cards + nodes for consistent depth. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+  /* Inter first, then system-ui — same visual rhythm as modern data-product
+     UIs. cv11 / ss01 OpenType features sharpen the numerals. */
+  font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
 }
 
 #topbar {
@@ -193,6 +213,115 @@ ul.articles li .src { color: var(--muted); font-size: 11px; margin-top: 1px; }
 
 #main { position: relative; flex: 1; }
 #cy { position: absolute; inset: 0; }
+
+/* ---- custom hover tooltip ----
+ * A single absolute-positioned div repositioned in JS on node hover.
+ * Pure-DOM, no external library, no CDN risk. Z-index above #cy but
+ * below modals. */
+#cy-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: var(--shadow-md);
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 260px;
+  opacity: 0;
+  transform: translate(-50%, -100%) translateY(-10px);
+  transition: opacity 120ms;
+}
+#cy-tooltip[hidden] { display: none; }
+#cy-tooltip.show { opacity: 1; }
+#cy-tooltip .ail-tip-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 3px;
+  color: var(--text);
+}
+#cy-tooltip .ail-tip-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+#cy-tooltip .ail-tip-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 5px;
+  font-style: italic;
+}
+#cy-tooltip .ail-tip-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 5px;
+  color: var(--bg);
+  vertical-align: middle;
+}
+/* Little arrow under the tooltip. */
+#cy-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--panel-2);
+}
+
+/* ---- custom right-click action menu ----
+ * Stacked vertical menu positioned at the right-click point. Replaces
+ * the cxtmenu radial wheel with a simpler list that's a) more
+ * discoverable, b) zero third-party deps. Same actions as the
+ * detail-panel buttons but reachable without opening the panel. */
+.cy-actions {
+  position: absolute;
+  z-index: 6;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cy-actions[hidden] { display: none; }
+.cy-actions button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.cy-actions button:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.cy-actions button[data-act="ignore"] { color: #f4a3a8; }
+.cy-actions button[data-act="ignore"]:hover { background: rgba(204, 79, 90, 0.18); }
+.cy-actions .cy-actions-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 6px 10px 3px;
+  pointer-events: none;
+}
 #hint {
   position: absolute;
   left: 12px;

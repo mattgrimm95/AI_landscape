@@ -4,11 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Landscape — Knowledge Graph</title>
-  <link rel="stylesheet" href="style.css?v=20260525q" />
+  <link rel="stylesheet" href="style.css?v=20260525t" />
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/layout-base/layout-base.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cose-base/cose-base.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose/cytoscape-fcose.js"></script>
+  <!-- All modernization (palette, typography, hover halo, hover tooltip,
+       right-click menu) is implemented in pure DOM/CSS/JS so the graph
+       has zero hard third-party dependencies beyond Cytoscape + fcose. -->
+
 </head>
 <body>
   <header id="topbar">
@@ -184,7 +188,20 @@
 
     <main id="main">
       <div id="cy"></div>
-      <div id="hint">drag to pan · scroll to zoom (more nodes appear as you zoom in) · click a node for detail · blue arrows are typed relationships</div>
+      <!-- Custom hover tooltip: a single absolute-positioned div that we
+           reposition + repopulate on node hover. No external lib so a
+           CDN outage can't break it. Hidden until first hover. -->
+      <div id="cy-tooltip" hidden></div>
+      <!-- Custom right-click action menu. Items are populated + buttons
+           wired from app.js when a node is right-clicked. -->
+      <div id="cy-actions" class="cy-actions" hidden>
+        <button data-act="focus">Focus here</button>
+        <button data-act="dossier">Open dossier</button>
+        <button data-act="select">Show detail panel</button>
+        <button data-act="ignore">Ignore entity</button>
+        <button data-act="merge">Merge into…</button>
+      </div>
+      <div id="hint">drag to pan · scroll to zoom · click a node for detail · right-click for actions · blue arrows are typed relationships</div>
       <div id="message"></div>
     </main>
   </div>
@@ -250,6 +267,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260525q"></script>
+  <script src="app.js?v=20260525u"></script>
 </body>
 </html>
