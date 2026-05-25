@@ -1,0 +1,32 @@
+# AI Landscape — minimal compose file.
+#
+#   docker compose up           # bring the web app up on http://localhost:8000
+#   docker compose run --rm web rebuild  # rebuild derived DBs in the volume
+#   docker compose run --rm web run      # full ingest (scrape + rebuild)
+#
+# The data/ directory is bind-mounted so the derived databases survive
+# container restarts AND remain inspectable on the host (e.g. for backups
+# or for the operator's own sqlite3 sessions). The corpus + snapshots
+# are baked INTO the image -- they're version-controlled source-of-truth,
+# not runtime state.
+
+services:
+  web:
+    build: .
+    image: ai-landscape:latest
+    container_name: ai-landscape
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist derived caches across container restarts. First run
+      # will populate this from the corpus (NER + KG rebuild on cold
+      # start). The host directory must exist before `docker compose up`.
+      - ./data:/app/data
+    environment:
+      # Set ANTHROPIC_API_KEY at the host (e.g. via a .env file --
+      # gitignored) to enable the LLM synthesis paths inside the
+      # container. Without it, the cache-first /api/hype and
+      # /api/briefing/narrative endpoints still serve any committed
+      # snapshot in snapshots/syntheses/.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped

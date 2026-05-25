@@ -1,0 +1,83 @@
+# AI Landscape — single-image container for the web app + CLI.
+#
+# The image bakes in:
+#   * the Python runtime + requirements.txt
+#   * the application code (ailandscape/, scripts/)
+#   * the version-controlled corpus, snapshots, and corrections — these
+#     ARE the project's source of truth; serving the app without them
+#     would be meaningless
+#
+# What lives OUTSIDE the image (mounted at run time, see docker-compose.yml):
+#   * data/  — derived caches (knowledge_graph.db, ner_output_log.db,
+#              run_history.jsonl). Rebuilt on first run.
+#
+# Multi-stage build keeps the final image small: the `builder` stage has
+# the compiler toolchain for any wheels that need it; the runtime stage
+# is a fresh slim image with just the installed packages.
+#
+# Default command: `ailandscape serve --port 8000` -- the FastAPI web app.
+# Override CMD to use the CLI instead (e.g. `docker compose run web run`
+# to trigger an ingestion).
+
+# ---- builder stage --------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# build-essential covers any C extensions in the dep tree (lxml etc.)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install runtime deps into a virtualenv we can copy whole into the final
+# image -- gives us a small image without compilers.
+RUN python -m venv /venv
+ENV PATH=/venv/bin:$PATH
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ---- runtime stage --------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+# Run as a non-root user. The /data volume is chowned to this user at
+# image-build time so the entrypoint can write to it without --user
+# overrides at runtime.
+RUN useradd --create-home --shell /bin/bash --uid 1000 ail
+
+ENV PATH=/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    AIL_HOME=/app
+
+WORKDIR /app
+
+# Copy the prebuilt venv from the builder stage.
+COPY --from=builder /venv /venv
+
+# Copy the source of truth + application code. We DO copy snapshots/ +
+# corpus/ + corrections.json so the running container can serve real
+# content immediately; derived data/ is left to the mounted volume.
+COPY --chown=ail:ail ailandscape/ ./ailandscape/
+COPY --chown=ail:ail scripts/ ./scripts/
+COPY --chown=ail:ail corpus/ ./corpus/
+COPY --chown=ail:ail snapshots/ ./snapshots/
+COPY --chown=ail:ail corrections.json review.json ./
+COPY --chown=ail:ail requirements.txt README.md LLM_INDEX.md ./
+
+# Create the data/ dir (mounted at runtime) and hand ownership to the
+# non-root user. Mounting empty over this is harmless.
+RUN mkdir -p /app/data && chown -R ail:ail /app/data
+
+USER ail
+
+# Healthcheck: /api/overview is a cheap read that exercises the corpus
+# loader + the KG store -- if either is broken the container is unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/api/overview', timeout=4).read(); sys.exit(0)" || exit 1
+
+EXPOSE 8000
+
+# Default: serve the web app. Override at `docker run` / `docker compose run`
+# to use any other CLI subcommand: e.g. `docker compose run web rebuild`.
+CMD ["python", "-m", "ailandscape.cli", "serve", "--port", "8000"]

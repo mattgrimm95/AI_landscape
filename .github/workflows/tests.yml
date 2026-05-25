@@ -1,0 +1,51 @@
+# Run the full unittest suite on every push + every pull request.
+#
+# Why no spaCy in CI? The default NER backend is "hybrid" (gazetteer +
+# spaCy), but the test suite uses the rule backend everywhere via
+# `ner_backend="rule"`, so spaCy is unnecessary and would balloon the
+# install from ~5 MB to ~500 MB. The pipeline auto-falls-back when
+# spaCy isn't installed, which IS one of the things the tests cover.
+#
+# The shipped requirements.txt is conservative -- only the runtime deps
+# the test suite needs. CI installs that file verbatim so a CI green
+# means a fresh-clone install would also pass.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # let me re-run from the Actions tab without a push
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run secrets guard explicitly
+        # The tests include a no-secrets guard, but run it first so a
+        # leaked key fails the build before any other test even loads.
+        run: python -m unittest tests.test_no_secrets -v
+
+      - name: Run full test suite
+        run: python -m unittest discover -s tests -t . -v

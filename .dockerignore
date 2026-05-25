@@ -1,0 +1,43 @@
+# Keep the build context small and the image clean.
+# What goes IN the image is declared explicitly via COPY in the Dockerfile;
+# this file just prevents accidental inclusion of local cruft.
+
+# --- derived databases / per-machine runtime state ---
+data/
+*.db
+*.db-journal
+*.log
+
+# --- Python detritus ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# --- editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Claude Code local config (per-machine) ---
+.claude/
+*.dpapi
+
+# --- git ---
+.git/
+.gitignore
+.github/
+
+# --- secrets (defense in depth -- never in an image) ---
+.env
+.env.*
+*.pem
+*.key
+secrets.*
