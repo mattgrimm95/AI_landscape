@@ -51,7 +51,87 @@ URL so re-running with the same body is a no-op too.
 import datetime
 import hashlib
 
-from . import corpus, scraper
+from . import corpus, sbir, scraper
+
+
+# ---- AI-relevance gate -----------------------------------------------------
+#
+# The whole project is scoped to AI national-security reporting; an enrich
+# run that quietly drops non-AI articles into the corpus would dilute that
+# focus and pollute the graph with off-topic entities. The same regex SBIR
+# uses to filter award abstracts is reused here so the bar is consistent
+# across all data sources -- and so a single tweak to sbir._AI_TERMS lifts
+# both gates at once.
+#
+# Plan-level (not per-article) granularity: an enrichment plan is about
+# one entity / topic, and the synthesis is the operator's canonical
+# statement of WHY this batch is being added. If the synthesis OR any
+# article shows AI signal, the plan is admitted in full -- this matches
+# the real-world case where a B-21 plan contains production-deal stories
+# (no explicit "AI" term) but the synthesis frames B-21 as an AI-enabled
+# platform. The escape hatch is `enrich_from_plan(..., allow_non_ai=True)`,
+# used by the CLI's --allow-non-ai flag for deliberate exceptions.
+
+
+def _is_ai_relevant(text):
+    """True if `text` contains an AI / ML / autonomy term recognised by the
+    same regex SBIR uses to filter award abstracts."""
+    if not text:
+        return False
+    text_str = str(text)
+    return bool(
+        sbir._AI_TERMS.search(text_str.lower())
+        or sbir._AI_ACRONYMS.search(text_str)
+    )
+
+
+def plan_ai_signal(plan):
+    """Return the AI-relevance signal for an enrichment plan as a dict.
+
+    Returns {"ok", "matched_in", "matched_terms"}:
+      * `ok` is True if any article (title + html) OR the synthesis body
+        contains an AI/ML/autonomy term.
+      * `matched_in` is a short tag identifying where the signal came from
+        ("synthesis", "article: <url>", or "").
+      * `matched_terms` is a deduped list of the actual term hits (handy
+        for an "AI relevance: ..." log line).
+    """
+    synthesis = plan.get("synthesis") or {}
+    syn_text = " ".join([
+        str(synthesis.get("title", "")),
+        str(synthesis.get("body", "")),
+    ])
+    if _is_ai_relevant(syn_text):
+        return {
+            "ok": True,
+            "matched_in": "synthesis",
+            "matched_terms": _ai_terms_in(syn_text),
+        }
+    for article in plan.get("articles") or []:
+        text = " ".join([
+            str(article.get("title", "")),
+            str(article.get("html", "")),
+        ])
+        if _is_ai_relevant(text):
+            return {
+                "ok": True,
+                "matched_in": "article: %s" % article.get("url", "?"),
+                "matched_terms": _ai_terms_in(text),
+            }
+    return {"ok": False, "matched_in": "", "matched_terms": []}
+
+
+def _ai_terms_in(text):
+    """Distinct AI term hits in `text`, for diagnostic logging."""
+    if not text:
+        return []
+    text_str = str(text)
+    found = set()
+    for m in sbir._AI_TERMS.finditer(text_str.lower()):
+        found.add(m.group(0))
+    for m in sbir._AI_ACRONYMS.finditer(text_str):
+        found.add(m.group(0))
+    return sorted(found)
 
 
 def _utcnow_iso():
@@ -110,7 +190,14 @@ def add_article(corpus_path, url, title, source, published="",
         log("skip (already in corpus): %s" % (title or url)[:70])
         return None
     if prefetched_html is not None:
+        # Trafilatura wants article-shaped HTML (it looks for an <article>
+        # tag, multiple paragraphs, etc.) and returns nothing for a short
+        # snippet -- which is exactly the shape WebFetch / an LLM tool
+        # often hands us. Fall back to BeautifulSoup's get_text so a
+        # well-formed short paragraph isn't silently dropped.
         body = scraper.extract_text_from_html(prefetched_html, fallback="")
+        if not body.strip():
+            body = scraper.html_to_text(prefetched_html)
     else:
         body = scraper.extract_article(url, fallback="")
     if not body.strip():
@@ -158,16 +245,49 @@ def add_synthesis(corpus_path, entity, body, title=None,
     return record["content_hash"]
 
 
-def enrich_from_plan(corpus_path, plan, log=None):
+def enrich_from_plan(corpus_path, plan, log=None, allow_non_ai=False):
     """Execute an enrichment plan: fetch the articles + append the synthesis.
 
-    Returns {"entity", "articles_added", "articles_skipped", "synthesis_added"}.
+    AI-relevance gate: the plan is checked for AI/ML/autonomy signal in its
+    synthesis OR any article. If no signal is found, the whole plan is
+    rejected (skipped=count_of_articles, ai_relevant=False) so an off-topic
+    enrichment can't quietly land in the AI-focused corpus. Pass
+    ``allow_non_ai=True`` (or ``--allow-non-ai`` on the CLI) to bypass.
+
+    Returns {"entity", "articles_added", "articles_skipped",
+    "synthesis_added", "ai_relevant", "ai_matched_in", "ai_matched_terms"}.
+
     A per-article failure is non-fatal — fetch errors are caught so the
     rest of the plan still lands. The corpus stays consistent because
     every record is appended atomically (one JSON line at a time).
     """
     log = log or (lambda *_a: None)
     articles = plan.get("articles") or []
+
+    signal = plan_ai_signal(plan)
+    if not signal["ok"] and not allow_non_ai:
+        log(
+            "AI-relevance gate: REJECTED plan for %r -- no AI/ML/autonomy "
+            "term found in synthesis or any article. Pass --allow-non-ai "
+            "to override." % plan.get("entity", "?")
+        )
+        return {
+            "entity": plan.get("entity", ""),
+            "articles_added": 0,
+            "articles_skipped": len(articles),
+            "synthesis_added": False,
+            "ai_relevant": False,
+            "ai_matched_in": "",
+            "ai_matched_terms": [],
+        }
+    if signal["ok"]:
+        log("AI-relevance gate: accepted plan for %r (matched in %s: %s)"
+            % (plan.get("entity", "?"), signal["matched_in"],
+               ", ".join(signal["matched_terms"][:5]) or "(none)"))
+    else:
+        log("AI-relevance gate: BYPASSED via --allow-non-ai for plan %r"
+            % plan.get("entity", "?"))
+
     added = 0
     skipped = 0
     for article in articles:
@@ -210,4 +330,7 @@ def enrich_from_plan(corpus_path, plan, log=None):
         "articles_added": added,
         "articles_skipped": skipped,
         "synthesis_added": synthesis_added,
+        "ai_relevant": signal["ok"],
+        "ai_matched_in": signal["matched_in"],
+        "ai_matched_terms": signal["matched_terms"],
     }

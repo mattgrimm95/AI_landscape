@@ -588,7 +588,8 @@ def cmd_enrich(args):
     with open(args.plan, "r", encoding="utf-8") as handle:
         plan = json.load(handle)
     result = enrich.enrich_from_plan(
-        config.CORPUS_FILE, plan, log=_log
+        config.CORPUS_FILE, plan, log=_log,
+        allow_non_ai=args.allow_non_ai,
     )
     print(json.dumps(result, indent=2))
     if args.no_rebuild:
@@ -963,6 +964,13 @@ def build_parser():
         "--no-rebuild", action="store_true",
         help="append to the corpus but don't trigger the rebuild — chain"
              " several plans, then run `rebuild` once at the end",
+    )
+    enrich_p.add_argument(
+        "--allow-non-ai", action="store_true",
+        help="bypass the AI-relevance gate (which rejects a plan whose"
+             " synthesis + articles contain no AI/ML/autonomy term). Use"
+             " sparingly: the corpus is scoped to AI national-security"
+             " reporting and off-topic content dilutes the graph.",
     )
     enrich_p.set_defaults(func=cmd_enrich)
 
