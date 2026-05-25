@@ -2,12 +2,18 @@
 # ghcr.io on every push to main so the latest image is always one
 # `docker pull ghcr.io/<owner>/ai_landscape:latest` away.
 #
-# Two jobs:
+# Three jobs:
 #   * build            — runs on push + PR; ensures the Dockerfile still
 #                        builds against the current source. No registry
 #                        push, so PRs from forks don't need package perms.
 #   * build-and-push   — runs on push to main only; builds with cache
 #                        from the registry, pushes :latest + :sha tag.
+#   * smoke-test       — runs on push to main after build-and-push:
+#                        pulls the just-published image by its SHA tag,
+#                        boots it, polls /api/overview until 200 or
+#                        30s timeout. Closes the "Dockerfile built but
+#                        the app crashes on startup" gap that the host
+#                        Python tests can't catch.
 #
 # GHCR auth uses the workflow's GITHUB_TOKEN with packages:write
 # permission — no PAT to manage, no secret to rotate.
@@ -103,3 +109,71 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Smoke-test the published image — closes the gap where a Dockerfile
+  # builds fine but the app crashes on startup. Pulls the *exact* image
+  # we just pushed (by SHA tag, not :latest, so a concurrent push can't
+  # race us), boots it, polls /api/overview until it returns 200 or
+  # 30 seconds elapse. On failure, tails the container logs to make
+  # the diagnostic trivial.
+  smoke-test:
+    name: Smoke-test published image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: read       # only need to PULL, not push
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute short SHA tag
+        id: tag
+        # The build-and-push job tagged the image as sha-<7-char short>;
+        # docker/metadata-action's default short SHA is the first 7
+        # chars of $GITHUB_SHA. Match that here so we always pull the
+        # exact image this run produced.
+        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull the published image
+        run: docker pull "${{ steps.tag.outputs.image }}"
+
+      - name: Run the container
+        run: |
+          docker run -d \
+            --name ail-smoke \
+            -p 8000:8000 \
+            "${{ steps.tag.outputs.image }}"
+          echo "Container started; container ID: $(docker ps -q -f name=ail-smoke)"
+
+      - name: Wait for /api/overview to return 200
+        # Poll once per second for 30s. The Dockerfile's HEALTHCHECK has
+        # start-period=15s so the app typically responds within that
+        # window, but allow up to 30s headroom on a cold runner.
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if curl -fsS -o /tmp/overview.json -w '%{http_code}' \
+                http://localhost:8000/api/overview > /tmp/code 2>/dev/null
+            then
+              code=$(cat /tmp/code)
+              if [ "$code" = "200" ]; then
+                bytes=$(wc -c < /tmp/overview.json)
+                echo "::notice::/api/overview returned 200 (${bytes}B) after ${i}s"
+                exit 0
+              fi
+            fi
+            sleep 1
+          done
+          echo "::error::/api/overview never returned 200 within 30s"
+          docker logs ail-smoke || true
+          exit 1
+
+      - name: Tear down container
+        if: always()
+        run: docker rm -f ail-smoke || true
