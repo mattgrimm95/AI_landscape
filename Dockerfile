@@ -73,6 +73,22 @@ RUN mkdir -p /app/data && chown -R ail:ail /app/data
 
 USER ail
 
+# Pre-build the derived SQLite databases (NER log + knowledge graph)
+# so the image ships ready-to-serve. Without this, a fresh container
+# would start with empty data/ and /api/overview would error until
+# the operator ran rebuild manually.
+#
+# Uses the rule-based NER backend (no spaCy model dependency), which
+# matches what the test suite + CI use. The host can override at
+# runtime by mounting their own data/ volume.
+#
+# This step is expensive (~30-60s on the published corpus) but only
+# runs when corpus/ or ailandscape/ changes -- Docker's layer cache
+# skips it on subsequent builds with unchanged source.
+RUN python -m ailandscape.cli rebuild --ner rule \
+    && echo "Pre-built data/ contents:" \
+    && ls -la /app/data/
+
 # Healthcheck: /api/overview is a cheap read that exercises the corpus
 # loader + the KG store -- if either is broken the container is unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

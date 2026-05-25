@@ -152,12 +152,13 @@ jobs:
           echo "Container started; container ID: $(docker ps -q -f name=ail-smoke)"
 
       - name: Wait for /api/overview to return 200
-        # Poll once per second for 30s. The Dockerfile's HEALTHCHECK has
-        # start-period=15s so the app typically responds within that
-        # window, but allow up to 30s headroom on a cold runner.
+        # Poll once per second for up to 60s. The image ships with the
+        # derived SQLite DBs pre-built (see Dockerfile RUN rebuild), so
+        # the FastAPI server should respond within a few seconds of
+        # boot. 60s is comfortable headroom on a cold runner.
         run: |
           set -e
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -fsS -o /tmp/overview.json -w '%{http_code}' \
                 http://localhost:8000/api/overview > /tmp/code 2>/dev/null
             then
@@ -170,7 +171,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "::error::/api/overview never returned 200 within 30s"
+          echo "::error::/api/overview never returned 200 within 60s"
           docker logs ail-smoke || true
           exit 1
 
