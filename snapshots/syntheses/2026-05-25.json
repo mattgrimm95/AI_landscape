@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-25",
+  "generated_at": "2026-05-25T14:30:00+00:00",
+  "corpus_mtime": "2026-05-25T14:25:00+00:00",
+  "corpus_documents": 709,
+  "hype": {
+    "available": true,
+    "text": "Three days of catch-up just dropped 278 new articles into the corpus and the picture has sharpened: U.S. Special Operations Forces are now openly saying \"smaller, easier, smarter\" is what they need from AI -- Defense One reports SOCOM's push toward field-deployable models, not cloud-tethered ones. The USS Gerald R. Ford may soon double as a floating nuclear power plant for land facilities, per TWZ. SIPRI's new tally shows UN peacekeeping at a 25-year low even as combatant commands lean harder on Palantir Maven. The ASPI Strategist confirms the Quad remains alive after this week's foreign ministers' meeting in Tokyo, with Japan-Australia combined-force training expanding at Darwin. The B-21 Raider production-acceleration story keeps moving (Northrop is now scaling toward a 25-percent capacity bump). Industrial base, alliance posture, edge AI -- all three vectors heating up at once.",
+    "window_days": 1,
+    "documents_used": 12,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "Across 709 documents and 653 typed relationships the landscape splits into three reinforcing themes this week. First, edge-deployable AI is now the explicit ask from operators: Defense One's SOCOM coverage frames \"smaller, easier, smarter\" models as the gating requirement for special operations, complementing Palantir Maven's continued program-of-record momentum and Anduril's Lattice integration contracts. Second, the industrial base is expanding under public pressure: Northrop Grumman's $4.5B B-21 Raider production-capacity deal, Lockheed's THAAD plant groundbreaking, and Navy's seven MUSV prototype selections all advanced this week. Third, the alliance picture is firming despite trans-Atlantic friction: NATO acquisition of Palantir Maven Smart System NATO continues to expand, the Quad foreign ministers' meeting reaffirmed Indo-Pacific commitment, and U.S.-Japan-Australia combined-force training expanded at Darwin. Trending AI topics: edge inference, multi-sensor fusion, collaborative combat aircraft, electronic warfare. Most active entities: U.S. Army, U.S. Navy, U.S. Air Force, Palantir, Anduril, NATO, Northrop Grumman, SOCOM.",
+    "window_days": 7,
+    "documents_used": 709,
+    "error": ""
+  }
+}
