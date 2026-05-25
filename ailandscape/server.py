@@ -429,6 +429,60 @@ def api_overview():
         kg.close()
 
 
+@app.get("/api/history")
+def api_history(limit: int = Query(60, ge=1, le=365)):
+    """Pipeline ingest history -- one record per `ailandscape run` invocation.
+
+    Reads snapshots/run-history.jsonl (the per-run JSONL the pipeline
+    appends to) and returns the last `limit` entries in chronological
+    order. Each entry carries timing (scrape_seconds, rebuild_seconds),
+    document/node/typed-relation counts, fetched/added/filtered_non_ai
+    totals, the per-feed scorecard with errors, and the quality KPIs.
+
+    Falls back to the legacy `data/run_history.jsonl` location for clones
+    that haven't been re-run since the file moved to snapshots/.
+    """
+    path = config.RUN_HISTORY_FILE
+    if not path.exists():
+        legacy = getattr(config, "_LEGACY_RUN_HISTORY", None)
+        if legacy and legacy.exists():
+            path = legacy
+        else:
+            return {"runs": [], "total": 0, "broken_feeds": []}
+    runs = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                runs.append(json.loads(line))
+            except ValueError:
+                # Skip a malformed line rather than crash the endpoint --
+                # one bad row shouldn't blind the operator to everything.
+                continue
+    total = len(runs)
+    runs = runs[-limit:]
+    # Surface broken feeds across the visible window so the modal can
+    # show a single "currently failing" callout without re-walking
+    # every feed dict in the frontend.
+    broken = collections.Counter()
+    last_seen = {}
+    for run in runs:
+        finished = run.get("finished_at", "")
+        for name, info in (run.get("feeds") or {}).items():
+            err = (info or {}).get("error", "")
+            if err:
+                broken[name] += 1
+                last_seen[name] = (finished, err[:140])
+    broken_feeds = [
+        {"name": name, "runs_failing": count,
+         "last_run": last_seen[name][0], "last_error": last_seen[name][1]}
+        for name, count in broken.most_common()
+    ]
+    return {"runs": runs, "total": total, "broken_feeds": broken_feeds}
+
+
 @app.get("/api/trends")
 def api_trends():
     """Temporal signals — document volume by month, new and active entities."""

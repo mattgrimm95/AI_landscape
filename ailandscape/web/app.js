@@ -1364,6 +1364,135 @@ async function showCapabilities() {
 
 // ---- trajectory modal (corpus over many months) ---------------------------
 
+// ---- Pipeline modal (ingest run history) -----------------------------------
+//
+// Reads /api/history and renders a Trajectory-style readout for daily
+// scrape runs: summary stats up top, a per-run bar (added vs filtered),
+// a per-feed health callout (any feed currently erroring), and a tail
+// table of recent runs with timing + error rows. Same idiom as the
+// existing Dashboard / Trends / Trajectory modals so the operator
+// learns one pattern.
+
+function _pipelineTimeAgo(iso) {
+  if (!iso) return "(unknown)";
+  const t = new Date(iso);
+  if (isNaN(t)) return iso;
+  const s = (Date.now() - t.getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+
+async function showPipeline() {
+  let data;
+  try {
+    data = await api("/api/history?limit=30");
+  } catch (e) {
+    setMessage("Pipeline unavailable: " + e.message);
+    return;
+  }
+  const runs = data.runs || [];
+  if (!runs.length) {
+    openModal(
+      '<h2 class="modal-title">Pipeline</h2>' +
+      '<p class="muted">No runs recorded yet. The daily scrape (or' +
+      ' <code>ailandscape run</code>) writes a record on each invocation.</p>'
+    );
+    return;
+  }
+  const latest = runs[runs.length - 1];
+  const totalAdded = runs.reduce((a, r) => a + (r.added || 0), 0);
+  const totalFiltered = runs.reduce((a, r) => a + (r.filtered_non_ai || 0), 0);
+  const totalFetched = runs.reduce((a, r) => a + (r.fetched || 0), 0);
+  const peak = Math.max(
+    1,
+    ...runs.map((r) => Math.max(r.added || 0, r.filtered_non_ai || 0))
+  );
+
+  const stat = (k, v) =>
+    '<div class="dash-stat"><div class="v">' + v + '</div>' +
+    '<div class="k">' + k + "</div></div>";
+
+  let html =
+    '<h2 class="modal-title">Pipeline ingest history</h2>' +
+    '<p class="mini-spark-note">One record per <code>ailandscape run</code>' +
+    ' invocation. Sourced from snapshots/run-history.jsonl.</p>' +
+    '<div class="dash-grid">' +
+    stat("Latest run", _pipelineTimeAgo(latest.finished_at)) +
+    stat("Runs in window", runs.length + " of " + data.total) +
+    stat("Articles added", totalAdded.toLocaleString()) +
+    stat("Filtered (non-AI)", totalFiltered.toLocaleString()) +
+    "</div>";
+
+  // Broken feeds callout (anything that errored in any visible run).
+  const broken = data.broken_feeds || [];
+  if (broken.length) {
+    html += "<h3>Currently failing feeds</h3>" +
+      '<ul class="click-list">' +
+      broken.slice(0, 10).map((f) =>
+        '<li><span>' + escapeHtml(f.name) + '</span>' +
+        '<em>' + f.runs_failing + " run(s) — " + escapeHtml(f.last_error) +
+        "</em></li>"
+      ).join("") +
+      "</ul>";
+  }
+
+  // Per-run mini bars: added (green) vs filtered_non_ai (orange).
+  // Most-recent first reads more naturally for a returning user.
+  const ordered = runs.slice().reverse();
+  html += "<h3>Recent runs (added vs filtered)</h3>" +
+    '<div class="pipeline-runs">' +
+    ordered.map((r) => {
+      const added = r.added || 0;
+      const filt = r.filtered_non_ai || 0;
+      const fetched = r.fetched || 0;
+      const finished = (r.finished_at || "").slice(0, 16).replace("T", " ");
+      const errors = Object.entries(r.feeds || {})
+        .filter(([_, info]) => info && info.error)
+        .map(([name]) => name);
+      const errBadge = errors.length
+        ? ' <span class="pipeline-err" title="' +
+          escapeHtml(errors.join(", ")) + '">⚠ ' + errors.length +
+          "</span>"
+        : "";
+      return (
+        '<div class="pipeline-row">' +
+          '<div class="pipeline-when">' + escapeHtml(finished) + errBadge + "</div>" +
+          '<div class="pipeline-bar-stack">' +
+            '<span class="pipeline-bar pipeline-bar-added" ' +
+            'style="width:' + Math.min(100, Math.round((100 * added) / peak)) + '%" ' +
+            'title="' + added + ' articles added"></span>' +
+            '<span class="pipeline-bar pipeline-bar-filt" ' +
+            'style="width:' + Math.min(100, Math.round((100 * filt) / peak)) + '%" ' +
+            'title="' + filt + ' filtered as non-AI"></span>' +
+          "</div>" +
+          '<div class="pipeline-counts">' +
+            '<span class="pc-added" title="added">+' + added + "</span>" +
+            '<span class="pc-filt" title="filtered as non-AI">−' + filt + "</span>" +
+            '<span class="pc-fetch" title="fetched (deduped against existing)">' + fetched + "↓</span>" +
+          "</div>" +
+        "</div>"
+      );
+    }).join("") +
+    "</div>";
+
+  // Throughput numbers in a tidy bottom block.
+  const totalScrapeS = runs.reduce((a, r) => a + (r.scrape_seconds || 0), 0);
+  const totalRebuildS = runs.reduce((a, r) => a + (r.rebuild_seconds || 0), 0);
+  html += "<h3>Throughput</h3>" +
+    '<div class="stat"><span class="label">Total fetched (visible window)</span>' +
+    '<span class="value">' + totalFetched.toLocaleString() + "</span></div>" +
+    '<div class="stat"><span class="label">Total scrape time</span>' +
+    '<span class="value">' + Math.round(totalScrapeS) + " s</span></div>" +
+    '<div class="stat"><span class="label">Total rebuild time</span>' +
+    '<span class="value">' + Math.round(totalRebuildS) + " s</span></div>" +
+    '<div class="stat"><span class="label">Avg added per run</span>' +
+    '<span class="value">' + (totalAdded / runs.length).toFixed(1) + "</span></div>";
+
+  openModal(html);
+}
+
 async function showTrajectory() {
   let data;
   try {
@@ -2063,6 +2192,9 @@ function init() {
   }
   if ($("open-trajectory")) {
     $("open-trajectory").addEventListener("click", showTrajectory);
+  }
+  if ($("open-pipeline")) {
+    $("open-pipeline").addEventListener("click", showPipeline);
   }
   if ($("surprise-me")) {
     $("surprise-me").addEventListener("click", surpriseMe);

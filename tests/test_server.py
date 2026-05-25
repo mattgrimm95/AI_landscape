@@ -27,6 +27,11 @@ class ServerApiTest(unittest.TestCase):
         config.CORPUS_FILE = pathlib.Path(self.tmp) / "documents.jsonl"
         config.CORRECTIONS_FILE = pathlib.Path(self.tmp) / "corrections.json"
         config.RUN_HISTORY_FILE = pathlib.Path(self.tmp) / "run_history.jsonl"
+        # The /api/history endpoint falls back to _LEGACY_RUN_HISTORY when
+        # the primary file is missing; redirect that too so an empty
+        # test doesn't accidentally read the developer's real history.
+        self._orig_legacy_history = getattr(config, "_LEGACY_RUN_HISTORY", None)
+        config._LEGACY_RUN_HISTORY = pathlib.Path(self.tmp) / "legacy.jsonl"
         # Each test gets its own snapshot dir so the synthesis cache
         # doesn't bleed across tests (or read the repo's real snapshots).
         synthesis_cache.SNAPSHOT_SUBDIR = pathlib.Path(self.tmp) / "syntheses"
@@ -91,6 +96,8 @@ class ServerApiTest(unittest.TestCase):
         ) = self._orig
         synthesis_cache.SNAPSHOT_SUBDIR = self._orig_snapshot_dir
         claude_cli.is_available = self._orig_cli_available
+        if self._orig_legacy_history is not None:
+            config._LEGACY_RUN_HISTORY = self._orig_legacy_history
 
     def test_graph_endpoint(self):
         resp = self.client.get("/api/graph?min_weight=1")
@@ -289,6 +296,58 @@ class ServerApiTest(unittest.TestCase):
         finally:
             if orig is not None:
                 os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_history_endpoint_empty(self):
+        # No run-history file present in the per-test tmp dir.
+        body = self.client.get("/api/history").json()
+        self.assertEqual(body["runs"], [])
+        self.assertEqual(body["total"], 0)
+        self.assertEqual(body["broken_feeds"], [])
+
+    def test_history_endpoint_serves_records_with_broken_feeds(self):
+        # Seed two runs, one with a broken feed.
+        from ailandscape import config as _cfg
+        hist_path = pathlib.Path(_cfg.RUN_HISTORY_FILE.parent) / "run-history.jsonl"
+        # The test setUp doesn't redirect RUN_HISTORY_FILE; write to the real
+        # location-relative path the endpoint reads.
+        # Easiest: temporarily redirect inside this test.
+        orig = _cfg.RUN_HISTORY_FILE
+        _cfg.RUN_HISTORY_FILE = pathlib.Path(self.tmp) / "rh.jsonl"
+        try:
+            _cfg.RUN_HISTORY_FILE.write_text("\n".join([
+                json.dumps({
+                    "finished_at": "2026-05-22T19:02:35+00:00",
+                    "fetched": 100, "added": 5, "filtered_non_ai": 0,
+                    "scrape_seconds": 60, "rebuild_seconds": 30,
+                    "documents": 100, "nodes": 1000,
+                    "typed_relations": 50,
+                    "feeds": {"GoodFeed": {"fetched": 50, "added": 5, "error": ""}},
+                }),
+                json.dumps({
+                    "finished_at": "2026-05-23T19:02:35+00:00",
+                    "fetched": 80, "added": 10, "filtered_non_ai": 20,
+                    "scrape_seconds": 50, "rebuild_seconds": 28,
+                    "documents": 110, "nodes": 1100,
+                    "typed_relations": 55,
+                    "feeds": {
+                        "BrokenFeed": {"fetched": 0, "added": 0,
+                                       "error": "404 Not Found"},
+                    },
+                }),
+            ]) + "\n", encoding="utf-8")
+            body = self.client.get("/api/history").json()
+            self.assertEqual(body["total"], 2)
+            self.assertEqual(len(body["runs"]), 2)
+            # Most-recent first NOT enforced server-side -- arrival order
+            # is preserved so the client can choose presentation order.
+            self.assertEqual(body["runs"][0]["fetched"], 100)
+            self.assertEqual(body["runs"][1]["filtered_non_ai"], 20)
+            # Broken feeds surfaced for the modal callout.
+            self.assertEqual(len(body["broken_feeds"]), 1)
+            self.assertEqual(body["broken_feeds"][0]["name"], "BrokenFeed")
+            self.assertIn("404", body["broken_feeds"][0]["last_error"])
+        finally:
+            _cfg.RUN_HISTORY_FILE = orig
 
     def test_briefing_narrative_serves_cached_snapshot(self):
         # Same cache-first contract for the briefing narrative.

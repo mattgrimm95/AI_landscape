@@ -899,6 +899,62 @@ details.pair-filter label { font-size: 12px; }
   background: var(--accent);
 }
 .traj-row .td-mini-bar .val { color: var(--text); min-width: 30px; text-align: right; }
+
+/* ---- pipeline modal -----------------------------------------------------
+ * One row per pipeline run: timestamp on the left, a stacked horizontal
+ * bar in the middle (green for "added", orange for "filtered as non-AI"),
+ * and per-row counts on the right. Reads top-to-bottom = most recent run
+ * at top; same idiom as the Trajectory modal.
+ */
+.pipeline-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+.pipeline-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 170px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.pipeline-row:last-child { border-bottom: 0; }
+.pipeline-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pipeline-bar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 14px;
+}
+.pipeline-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  min-width: 1px;
+}
+.pipeline-bar-added { background: #5fa55a; }       /* green - articles added  */
+.pipeline-bar-filt  { background: #e08a3c; }       /* orange - filtered out   */
+.pipeline-counts {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-counts .pc-added { color: #b1dca7; }
+.pipeline-counts .pc-filt  { color: #f0bb86; }
+.pipeline-counts .pc-fetch { color: var(--muted); }
+.pipeline-err {
+  display: inline-block;
+  background: rgba(204, 79, 90, 0.20);
+  color: #ff9aa3;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 4px;
+}
 .traj-types {
   margin-top: 14px;
   font-size: 11px;
