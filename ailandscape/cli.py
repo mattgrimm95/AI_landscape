@@ -889,13 +889,18 @@ def cmd_serve(args):
     import uvicorn
 
     config.ensure_dirs()
+    # Show 127.0.0.1 in the URL when bound to the loopback (the common local
+    # case) and the actual host string otherwise -- "http://0.0.0.0:8000" is
+    # not a real address you can click, so when bound to all interfaces we
+    # print 0.0.0.0 verbatim as a "listening on every interface" hint and
+    # let the operator type their LAN IP / container hostname.
     print(
-        "AI Landscape web app running at http://127.0.0.1:%d  (Ctrl+C to stop)"
-        % args.port
+        "AI Landscape web app running at http://%s:%d  (Ctrl+C to stop)"
+        % (args.host, args.port)
     )
     uvicorn.run(
         "ailandscape.server:app",
-        host="127.0.0.1",
+        host=args.host,
         port=args.port,
         log_level="warning",
     )
@@ -1163,6 +1168,13 @@ def build_parser():
 
     serve_p = sub.add_parser("serve", help="run the interactive web app")
     serve_p.add_argument("--port", type=int, default=8000)
+    # Default to loopback so a local `ailandscape serve` doesn't accidentally
+    # expose the dev server to the LAN. Containers override to 0.0.0.0 in the
+    # Dockerfile CMD so docker's port forwarding can reach it.
+    serve_p.add_argument(
+        "--host", default="127.0.0.1",
+        help="bind address (use 0.0.0.0 in containers)",
+    )
     serve_p.set_defaults(func=cmd_serve)
 
     history_p = sub.add_parser(

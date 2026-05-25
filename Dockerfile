@@ -98,4 +98,10 @@ EXPOSE 8000
 
 # Default: serve the web app. Override at `docker run` / `docker compose run`
 # to use any other CLI subcommand: e.g. `docker compose run web rebuild`.
-CMD ["python", "-m", "ailandscape.cli", "serve", "--port", "8000"]
+#
+# --host 0.0.0.0 is REQUIRED inside a container: docker's `-p 8000:8000`
+# forwards host:8000 to the container's external interface (eth0), not to
+# loopback. Binding uvicorn to 127.0.0.1 would mean forwarded packets find
+# nothing listening. The CLI default is 127.0.0.1 so local dev stays
+# loopback-only; containers opt in explicitly here.
+CMD ["python", "-m", "ailandscape.cli", "serve", "--host", "0.0.0.0", "--port", "8000"]
