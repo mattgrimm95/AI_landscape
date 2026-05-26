@@ -31,16 +31,24 @@ if (-not $python -or -not $git) {
 # 1. Scrape feeds into the corpus and rebuild the derived databases.
 Write-Log ((& $python -m ailandscape.cli run 2>&1 | Out-String).TrimEnd())
 
-# 2. Commit and push the corpus, but only if new articles were appended.
-& $git add corpus/documents.jsonl
-$changed = & $git status --porcelain corpus/documents.jsonl
+# 2. Generate the daily "hype read" so the web app's Today's Spotlight
+#    has a fresh artifact with a current timestamp. No-op when
+#    ANTHROPIC_API_KEY is unset; safe to call unconditionally.
+Write-Log ((& $python -m ailandscape.cli hype 2>&1 | Out-String).TrimEnd())
+
+# 3. Commit and push corpus changes — the document log and the daily hype
+#    are both inside corpus/, so a single `git add corpus/` picks up
+#    whichever files changed (one of the two may be unchanged on a quiet
+#    day; the no-changes guard below handles that).
+& $git add corpus/documents.jsonl corpus/daily_hype.json
+$changed = & $git status --porcelain corpus/documents.jsonl corpus/daily_hype.json
 if ($changed) {
     $msg = "Daily scrape: corpus update $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
     Write-Log ((& $git -c user.email='' commit -m $msg 2>&1 | Out-String).TrimEnd())
     Write-Log ((& $git push origin main 2>&1 | Out-String).TrimEnd())
     Write-Log 'committed and pushed corpus update'
 } else {
-    Write-Log 'no new articles; nothing to commit'
+    Write-Log 'no new articles or hype changes; nothing to commit'
 }
 
 Write-Log "=== $(Get-Date -Format 'HH:mm:ss')  done ===`r`n"

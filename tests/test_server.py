@@ -19,12 +19,14 @@ class ServerApiTest(unittest.TestCase):
             config.CORPUS_FILE,
             config.CORRECTIONS_FILE,
             config.RUN_HISTORY_FILE,
+            config.DAILY_HYPE_FILE,
         )
         config.KG_DB = pathlib.Path(self.tmp) / "kg.db"
         config.NER_OUTPUT_DB = pathlib.Path(self.tmp) / "ner.db"
         config.CORPUS_FILE = pathlib.Path(self.tmp) / "documents.jsonl"
         config.CORRECTIONS_FILE = pathlib.Path(self.tmp) / "corrections.json"
         config.RUN_HISTORY_FILE = pathlib.Path(self.tmp) / "run_history.jsonl"
+        config.DAILY_HYPE_FILE = pathlib.Path(self.tmp) / "daily_hype.json"
 
         kg = KnowledgeGraphStore(config.KG_DB)
         china = kg.insert_node("China", "place", mention_count=5, document_count=3)
@@ -79,6 +81,7 @@ class ServerApiTest(unittest.TestCase):
             config.CORPUS_FILE,
             config.CORRECTIONS_FILE,
             config.RUN_HISTORY_FILE,
+            config.DAILY_HYPE_FILE,
         ) = self._orig
 
     def test_graph_endpoint(self):
@@ -228,14 +231,62 @@ class ServerApiTest(unittest.TestCase):
             self.client.get("/api/node/999999/adjacent").status_code, 404
         )
 
-    def test_hype_endpoint_no_key_returns_unavailable(self):
+    def test_hype_endpoint_no_key_no_cache_returns_unavailable(self):
         import os
         orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        # Make sure the fixture has no cached artifact for this test.
+        if config.DAILY_HYPE_FILE.exists():
+            config.DAILY_HYPE_FILE.unlink()
         try:
             body = self.client.get("/api/hype").json()
             self.assertFalse(body["available"])
             self.assertIn("ANTHROPIC_API_KEY", body["message"])
         finally:
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
+
+    def test_hype_endpoint_returns_cached_artifact_by_default(self):
+        # Drop a synthetic cache file in place and confirm the endpoint
+        # serves it without ever calling Claude — the cached read is what
+        # the daily-scrape pipeline writes on the host.
+        import json as _json
+        config.DAILY_HYPE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.DAILY_HYPE_FILE.write_text(_json.dumps({
+            "generated_at": "2026-05-25T19:30:00+00:00",
+            "window_days": 1,
+            "documents_used": 4,
+            "hype": "Yesterday in AI: big news.",
+        }), encoding="utf-8")
+        try:
+            body = self.client.get("/api/hype").json()
+            self.assertTrue(body["available"])
+            self.assertTrue(body["cached"])
+            self.assertEqual(body["generated_at"], "2026-05-25T19:30:00+00:00")
+            self.assertEqual(body["hype"], "Yesterday in AI: big news.")
+        finally:
+            config.DAILY_HYPE_FILE.unlink(missing_ok=True)
+
+    def test_hype_endpoint_refresh_without_key_falls_back_to_cache(self):
+        import json as _json
+        import os
+        orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        config.DAILY_HYPE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.DAILY_HYPE_FILE.write_text(_json.dumps({
+            "generated_at": "2026-05-25T19:30:00+00:00",
+            "window_days": 1,
+            "documents_used": 4,
+            "hype": "Cached read.",
+        }), encoding="utf-8")
+        try:
+            body = self.client.get("/api/hype?refresh=true").json()
+            # Refresh requested, key missing → return the cache and a
+            # stale_refresh banner so the UI can explain why.
+            self.assertTrue(body["available"])
+            self.assertTrue(body["cached"])
+            self.assertTrue(body.get("stale_refresh"))
+            self.assertEqual(body["hype"], "Cached read.")
+        finally:
+            config.DAILY_HYPE_FILE.unlink(missing_ok=True)
             if orig is not None:
                 os.environ["ANTHROPIC_API_KEY"] = orig
 

@@ -878,6 +878,19 @@ details.pair-filter label { font-size: 12px; }
   margin-right: 4px;
 }
 
+/* ---- today's spotlight (hype read) ---- */
+.hype-stamp {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 4px 0 8px;
+}
+.hype-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.hype-actions button { flex: 0 0 auto; padding: 5px 12px; font-size: 12px; }
+
 /* ---- briefing-window tabs ---- */
 .briefing-tabs {
   display: flex;

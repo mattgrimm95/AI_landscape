@@ -11,6 +11,13 @@ CORPUS_DIR = ROOT / "corpus"
 # documents. Both SQLite databases are derived caches rebuilt from this file.
 CORPUS_FILE = CORPUS_DIR / "documents.jsonl"
 
+# A cached daily "hype read" — a Claude-generated 30-second exciting summary
+# of the most recent day's news. Version-controlled (lives under corpus/) so
+# every browser session sees the same artifact and the "generated at"
+# timestamp is meaningful across deploys. Written by `ailandscape hype`
+# (typically invoked from the daily scrape) and read by /api/hype.
+DAILY_HYPE_FILE = CORPUS_DIR / "daily_hype.json"
+
 NER_OUTPUT_DB = DATA_DIR / "ner_output_log.db"
 KG_DB = DATA_DIR / "knowledge_graph.db"
 

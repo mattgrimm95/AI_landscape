@@ -573,4 +573,45 @@ sidebar was reorganized into three collapsible groups (EXPLORE / TRACK
   trajectory, spikes, pulse, adjacent, hype, and briefing-with-subfield.
 - 245 tests pass (3 skipped — spaCy-dependent); up from 220.
 
+## 2026-05-26 — Hype read becomes a persisted daily artifact
+
+The "Today's spotlight" feature shipped in the previous batch was
+generate-on-click only: every press of the button called Claude live
+and threw the result away. There was no notion of "when was the last
+one created" because no artifact was ever written. That meant a user
+on a fresh page load paid the latency + token cost every time, and
+nothing meaningful existed between scheduled scrapes.
+
+Fixed by making the hype a persisted, nightly-regenerated artifact:
+
+- **New `ailandscape/hype.py` module**: owns the recent-document pick
+  (with the 3-day soft fallback for quiet news cycles), the
+  `synthesis.summarize_hype` call, and read/write of the JSON
+  artifact. Shared by the CLI and the server endpoint.
+- **Persisted at `corpus/daily_hype.json`** (version-controlled, under
+  the same directory as the corpus so the daily-scrape commit picks
+  it up automatically). Carries `generated_at`, `window_days`,
+  `documents_used`, and the hype text.
+- **New CLI command** `python -m ailandscape.cli hype`: generates and
+  saves the artifact. Designed to be safe to call unattended: a
+  missing `ANTHROPIC_API_KEY` or a Claude-side failure logs a note
+  and exits 0 so a hype problem never blocks the daily-scrape's
+  corpus commit.
+- **`/api/hype` now serves the cached artifact by default**, returning
+  `generated_at` + `cached:true`. `?refresh=true` regenerates on demand
+  and overwrites the file. If a live refresh fails but a cached read
+  exists, the endpoint serves the cache with a `stale_refresh` flag
+  so the UI can explain why.
+- **Frontend shows the "generated at" timestamp** in the spotlight
+  modal and offers a "Generate fresh now" button.
+- **Daily-scrape script (`scripts/daily_scrape.ps1`) updated** to call
+  `ailandscape hype` after the scrape and to add
+  `corpus/daily_hype.json` to the daily corpus commit.
+- **Tests**: `tests/test_hype.py` covers recent-doc selection (window,
+  soft fallback, fetched_at fallback, ordering), generate/save/load
+  roundtrip, and corrupt-file degradation. `tests/test_server.py`
+  adds cached-by-default, refresh-without-key-falls-back-to-cache, and
+  no-key + no-cache cases.
+- 255 tests pass (3 skipped — spaCy-dependent); up from 245.
+
 

@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import (
-    briefing, capabilities, config, corpus, reconcile, report, synthesis,
-    tours, trends, visualize,
+    briefing, capabilities, config, corpus, hype as hype_mod, reconcile,
+    report, synthesis, tours, trends, visualize,
 )
 from .storage_kg import KnowledgeGraphStore
 from .storage_ner import NEROutputLog
@@ -636,73 +636,77 @@ def api_briefing(
 
 
 @app.get("/api/hype")
-def api_hype(days: int = Query(1, ge=1, le=7)):
-    """An exciting, 30-second-read hype summary of the most recent day's news.
+def api_hype(
+    days: int = Query(1, ge=1, le=7),
+    refresh: bool = False,
+):
+    """The cached 30-second hype read, generated nightly by the daily scrape.
 
-    Pulls documents published or fetched within the last ``days`` days (a
-    soft fallback to 3 days kicks in when day 1 is empty so a quiet news
-    day still produces something), then asks Claude to write a short,
-    vivid hype piece. Strictly opt-in via ``ANTHROPIC_API_KEY`` — the
-    endpoint returns ``available=False`` (not an error) without a key so
-    the UI can render the feature without ever attempting the call.
+    By default this returns the persisted artifact at
+    ``config.DAILY_HYPE_FILE`` so every visitor gets the same hype piece
+    and the UI can show a meaningful "generated at" timestamp. With
+    ``?refresh=true`` (and an ``ANTHROPIC_API_KEY``) the endpoint
+    regenerates on the spot, overwrites the file, and returns the fresh
+    artifact — used by the "Generate fresh" button when the cache is
+    stale.
+
+    Returns ``available=False`` (not an error) when no key is set AND no
+    cached artifact exists, so the UI can render the feature without
+    ever attempting the call.
     """
+    cached = hype_mod.load(config.DAILY_HYPE_FILE)
+    if not refresh and cached:
+        return {
+            "available": True,
+            "cached": True,
+            "generated_at": cached.get("generated_at"),
+            "hype": cached.get("hype", ""),
+            "documents_used": cached.get("documents_used", 0),
+            "window_days": cached.get("window_days", days),
+        }
     if not synthesis.is_configured():
+        if cached:
+            # Refresh requested but no key — fall back to the cached
+            # artifact so the UI still has something to show.
+            return {
+                "available": True,
+                "cached": True,
+                "stale_refresh": True,
+                "generated_at": cached.get("generated_at"),
+                "hype": cached.get("hype", ""),
+                "documents_used": cached.get("documents_used", 0),
+                "window_days": cached.get("window_days", days),
+                "message": "ANTHROPIC_API_KEY not set; showing cached read.",
+            }
         return {
             "available": False,
             "message": "Set ANTHROPIC_API_KEY to enable the daily hype read.",
         }
     documents = _cached_corpus()
-    today = datetime.date.today()
-    cutoff_main = today - datetime.timedelta(days=days)
-    cutoff_fallback = today - datetime.timedelta(days=3)
-    recent = []
-    for doc in documents:
-        date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
-        if not date_str:
-            continue
-        try:
-            doc_date = datetime.date.fromisoformat(date_str[:10])
-        except ValueError:
-            continue
-        if doc_date >= cutoff_main:
-            recent.append(doc)
-    if not recent:
-        # Soft fallback so a quiet 24-hour window still produces output.
-        for doc in documents:
-            date_str = corpus.published_date(doc) or (doc.get("fetched_at") or "")[:10]
-            if not date_str:
-                continue
-            try:
-                doc_date = datetime.date.fromisoformat(date_str[:10])
-            except ValueError:
-                continue
-            if doc_date >= cutoff_fallback:
-                recent.append(doc)
-    # Most recent first; the prompt leans on the head of the list.
-    recent.sort(
-        key=lambda d: corpus.published_date(d)
-        or (d.get("fetched_at") or "")[:10],
-        reverse=True,
-    )
-    sbir_total = sum(
-        ((d.get("metadata") or {}).get("award_amount") or 0)
-        for d in documents
-        if (d.get("metadata") or {}).get("data_source") == "SBIR"
-    )
-    sbir_count = sum(
-        1 for d in documents
-        if (d.get("metadata") or {}).get("data_source") == "SBIR"
-    )
-    sbir_funding = {"awards": sbir_count, "total_amount": int(sbir_total)}
     try:
-        hype = synthesis.summarize_hype(recent, sbir_funding=sbir_funding)
+        artifact = hype_mod.generate_and_save(
+            documents, config.DAILY_HYPE_FILE, days=days,
+        )
     except synthesis.SynthesisError as exc:
-        return {"available": True, "error": str(exc)}
+        # Surface the live failure but keep any cached read available so
+        # the UI isn't blank.
+        body = {"available": True, "error": str(exc)}
+        if cached:
+            body.update({
+                "cached": True,
+                "generated_at": cached.get("generated_at"),
+                "hype": cached.get("hype", ""),
+                "documents_used": cached.get("documents_used", 0),
+                "window_days": cached.get("window_days", days),
+            })
+        return body
     return {
         "available": True,
-        "hype": hype,
-        "documents_used": len(recent),
-        "window_days": days,
+        "cached": False,
+        "generated_at": artifact["generated_at"],
+        "hype": artifact["hype"],
+        "documents_used": artifact["documents_used"],
+        "window_days": artifact["window_days"],
     }
 
 

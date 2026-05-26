@@ -11,6 +11,7 @@ Usage:
     python -m ailandscape.cli overview   print a statistical overview of the data
     python -m ailandscape.cli briefing   print a generated briefing of the landscape
     python -m ailandscape.cli trends     print temporal trends (volume, new/active entities)
+    python -m ailandscape.cli hype       generate + persist today's hype read (needs ANTHROPIC_API_KEY)
     python -m ailandscape.cli review     audit data quality and accumulate findings in review.json
     python -m ailandscape.cli digest     email the daily digest (opt-in; needs SMTP env vars + recipients)
     python -m ailandscape.cli visualize  render a static interactive HTML graph
@@ -36,7 +37,7 @@ import sys
 import tempfile
 
 from . import (
-    briefing, config, corpus, emailer, enrich, feed_discovery, pipeline,
+    briefing, config, corpus, emailer, enrich, feed_discovery, hype, pipeline,
     reconcile, report, review, scraper, synthesis, trends, visualize,
 )
 from . import feeds as feeds_mod
@@ -305,6 +306,38 @@ def cmd_review(_args):
         print(
             "apply ignores with: ailandscape correct ignore \"<name>\""
         )
+    return 0
+
+
+def cmd_hype(args):
+    """Generate the daily hype read and persist it to corpus/daily_hype.json.
+
+    Designed to be safe to call from the unattended daily scrape: a
+    missing ANTHROPIC_API_KEY logs a note and exits 0 (so the scrape's
+    corpus commit still happens), and a synthesis failure does the same.
+    Re-runs the generation every time it's invoked — the freshness signal
+    in the UI is the `generated_at` timestamp inside the file.
+    """
+    if not synthesis.is_configured():
+        _log(
+            "[hype] no ANTHROPIC_API_KEY set; skipping daily hype "
+            "generation (the existing %s, if any, is left in place)."
+            % config.DAILY_HYPE_FILE
+        )
+        return 0
+    documents = corpus.load(config.CORPUS_FILE)
+    try:
+        artifact = hype.generate_and_save(
+            documents, config.DAILY_HYPE_FILE, days=args.days,
+        )
+    except synthesis.SynthesisError as exc:
+        _log("[hype] synthesis failed: %s (cache left unchanged)" % exc)
+        return 0
+    _log(
+        "[hype] wrote %s — %d documents in scope, generated at %s"
+        % (config.DAILY_HYPE_FILE, artifact["documents_used"],
+           artifact["generated_at"])
+    )
     return 0
 
 
@@ -805,6 +838,17 @@ def build_parser():
     sub.add_parser(
         "trends", help="print temporal trends from the corpus and graph"
     ).set_defaults(func=cmd_trends)
+
+    hype_p = sub.add_parser(
+        "hype",
+        help="generate the daily Claude-powered hype read and persist it",
+    )
+    hype_p.add_argument(
+        "--days", type=int, default=1,
+        help="recency window in days (default 1; 3-day soft fallback applies"
+             " automatically when day 1 is empty)",
+    )
+    hype_p.set_defaults(func=cmd_hype)
 
     sub.add_parser(
         "review",

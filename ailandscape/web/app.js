@@ -1410,37 +1410,76 @@ async function showTrajectory() {
 
 // ---- daily hype read (Claude-powered) --------------------------------------
 
-async function showHype() {
+async function showHype(opts) {
+  opts = opts || {};
+  const refresh = !!opts.refresh;
   openModal(
     '<h2 class="modal-title">Today\'s spotlight</h2>' +
     '<p class="mini-spark-note">A 30-second hype read of the most recent ' +
-    "news, generated on demand from the corpus.</p>" +
-    '<div id="hype-box"><p class="muted">Generating…</p></div>'
+    "news, regenerated nightly by the scrape pipeline.</p>" +
+    '<div id="hype-box"><p class="muted">' +
+    (refresh ? "Regenerating…" : "Loading…") + "</p></div>"
   );
   let r;
   try {
-    r = await api("/api/hype");
+    r = await api("/api/hype" + (refresh ? "?refresh=true" : ""));
   } catch (e) {
     $("hype-box").innerHTML =
-      '<p class="narrative-note">Could not generate: ' +
+      '<p class="narrative-note">Could not load: ' +
       escapeHtml(e.message) + "</p>";
     return;
   }
   if (!r.available) {
+    // No key AND no cached file — nothing to show. Surface the setup hint.
     $("hype-box").innerHTML =
-      '<p class="narrative-note">' + escapeHtml(r.message) + "</p>";
+      '<p class="narrative-note">' + escapeHtml(r.message || "Unavailable") +
+      "</p>";
     return;
   }
-  if (r.error) {
-    $("hype-box").innerHTML =
-      '<p class="narrative-note">Synthesis failed: ' +
-      escapeHtml(r.error) + "</p>";
-    return;
-  }
+  // Error during a live refresh attempt — show it, plus the cached read
+  // if the server returned one.
+  const errorBanner = r.error
+    ? '<p class="narrative-note">Live refresh failed: ' +
+      escapeHtml(r.error) + (r.hype ? " (showing cached read below)" : "") +
+      "</p>"
+    : "";
+  const noKeyBanner = r.stale_refresh
+    ? '<p class="narrative-note">' + escapeHtml(r.message || "") + "</p>"
+    : "";
+  const stamp = r.generated_at
+    ? '<div class="hype-stamp">Generated ' +
+      escapeHtml(formatStamp(r.generated_at)) +
+      " · " + (r.documents_used || 0) + " recent documents" +
+      (r.cached === false ? " · just now" : "") +
+      "</div>"
+    : "";
+  const body = r.hype
+    ? '<div class="narrative">' + escapeHtml(r.hype) + "</div>"
+    : '<p class="narrative-note">No hype read available yet — run ' +
+      "<code>ailandscape hype</code> on the scraper host to seed one.</p>";
   $("hype-box").innerHTML =
-    '<div class="narrative">' + escapeHtml(r.hype) + "</div>" +
-    '<p class="mini-spark-note">Based on ' + r.documents_used +
-    " recent documents.</p>";
+    errorBanner + noKeyBanner + stamp + body +
+    '<div class="hype-actions">' +
+    '<button id="hype-refresh" class="ghost">Generate fresh now</button>' +
+    "</div>";
+  const btn = $("hype-refresh");
+  if (btn) {
+    btn.addEventListener("click", () => showHype({ refresh: true }));
+  }
+}
+
+function formatStamp(iso) {
+  // Render an ISO 8601 timestamp in a compact, locale-friendly form for
+  // the spotlight modal. Fails open: if anything goes wrong, return the
+  // raw string so the user at least sees the truth.
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  } catch (e) {
+    return iso;
+  }
 }
 
 // ---- surprise me (serendipity) ---------------------------------------------
