@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-27",
+  "generated_at": "2026-05-27T23:08:32+00:00",
+  "corpus_mtime": "2026-05-27T23:06:27+00:00",
+  "corpus_documents": 500,
+  "hype": {
+    "available": true,
+    "text": "The cyber war is going AI-native — fast. Israel's top cyber chief Yossi Karadi is seeking access to Anthropic's Mythos to defend government networks against Iran's hackers, who are now coordinating more closely than ever across state-backed operations. That's a named AI model being pulled into live national defense. Meanwhile, the Pentagon just dropped $9.7 billion on a Dell-Microsoft enterprise agreement to unify DoD software at scale — the infrastructure backbone that makes AI deployment across the services actually possible. Stack on top of that a $2.29 billion Space Force contract to SpaceX for a proliferated low-Earth orbit communications constellation, and SOCOM standing up an autonomous systems proving ground at NASA's Stennis Space Center. The platforms, the networks, the AI models — all moving in one direction, simultaneously. This isn't buildup. This is convergence.",
+    "window_days": 1,
+    "documents_used": 58,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "**AI NATIONAL SECURITY LANDSCAPE — INTELLIGENCE BRIEF**\n*27 May 2026 | Based on 500-document corpus, 10,757 entities*\n\n---\n\n**LEAD:** The U.S. defense-industrial base is accelerating AI procurement across all domains. The Pentagon, NATO, U.S. Space Force, and BARREL have all awarded recent contracts to autonomy and AI suppliers — including Palantir, SpaceX, and Perennial Autonomy — signaling a shift from experimentation to operational fielding.\n\n**TECHNOLOGY FRONT:** Collaborative Combat Aircraft, Electronic Warfare, and the Golden Dome missile-defense initiative are the most defense-specific trending topics, alongside broader AI themes (Agentic AI, LLMs, Generative AI). Google DeepMind's development of the Merops interceptor and Google Antigravity suggests frontier AI labs are moving into kinetic-adjacent programs.\n\n**COMPETITION:** China remains a primary named rival. Ukraine's prominence reflects active warzone AI integration. OpenAI, NVIDIA, and Google DeepMind dominate the developer landscape; NVIDIA's Jensen Huang and OpenAI's Codex are central nodes.\n\n**WATCH:** OpenAI's acquisition of Tomoro and an unresolved court ruling (\"Awaiting Court Ruling\" as a top entity) suggest legal friction ahead for AI contracting.",
+    "window_days": 7,
+    "documents_used": 500,
+    "error": ""
+  }
+}
