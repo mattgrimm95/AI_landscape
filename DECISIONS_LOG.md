@@ -574,3 +574,122 @@ sidebar was reorganized into three collapsible groups (EXPLORE / TRACK
 - 245 tests pass (3 skipped — spaCy-dependent); up from 220.
 
 
+## 2026-05-26 — Zero-to-MVP recommendation audit + workflow skills
+
+First MADR-format entry. Going forward, all new entries use the **Context /
+Decision / Consequences** structure ([adr.github.io/madr](https://adr.github.io/madr/))
+rather than the prior free-form sectioning. Existing entries are kept as-is.
+
+### Context
+
+The user asked for a recommendation on going from zero to MVP fast in a
+single sustained Claude session, with a workflow of brainstorm → one-shot
+build → feedback → maintenance. They then asked to validate that
+recommendation against top expert software-engineering knowledge.
+
+Three parallel research passes (Cockburn, Hunt/Thomas, Ries, Beck, Willison,
+Fowler, Brandolini, Hickey, Falco, Hughes, Nygard, Procida, McIlroy +
+[llmstxt.org](https://llmstxt.org/)) found that the recommendation was
+*partially right but contained four kinds of issue*: one framing tension
+(one-shot vs. walking skeleton), four missing brainstorm decisions, two
+overreaches (stdlib-first, TDD-replaced), and several wrong file names /
+locations (LLM_INDEX.md, golden-snapshot, `.claude/commands/`).
+
+The plan from this audit was approved with one user override (see below).
+
+### Decision
+
+Adopt the following changes:
+
+1. **Expand the brainstorm from 8 to 12 decisions.** Adds: domain model /
+   ubiquitous language, failure modes, observability, data lifecycle.
+   These are codified in `skills_plan.md` and walked by the new
+   `/brainstorm` skill at `~/.claude/skills/brainstorm/SKILL.md`.
+2. **Keep one-shot as the build mode** — explicit user override of expert
+   consensus (Cockburn / Hunt / Ries / Beck / Willison all favor
+   walking-skeleton-then-iterate). User's rationale: an engaged user with
+   strong taste collapses the iterate-from-MVP risk by running the
+   validated-learning loop *inside* the conversation rather than across
+   sessions. Mitigated by three guardrails baked into `/mvp-build`:
+   non-skippable brainstorm; walking-skeleton-shaped first commit (so
+   anything is revertible); immediate `/feedback-triage` follow-up.
+3. **Reject "stdlib-first"; adopt "minimize and justify each dependency."**
+   The original framing read as dogma. The revised wording (in
+   `skills_plan.md` line 14) says: prefer stdlib when the abstraction is
+   genuinely simple; reject deps that trade simplicity for convenience;
+   define a swappable-backend promotion path.
+4. **Replace "Test Driven Development" with pragmatic multi-strategy
+   testing.** Kent Beck still does TDD ~50/50. The new framing names four
+   strategies: TDD where behavior is pre-specifiable; approval tests
+   (Falco) for emergent behavior; **property-based tests** (Hypothesis /
+   QuickCheck — a real omission from the prior plan); adversarial battery
+   for the noisiest subsystem; no-secrets guard. Pick per subsystem.
+5. **Migrate file conventions to 2025 standards** (going-forward only,
+   existing files migrate as separate tasks):
+   - "golden snapshot" → "approval test" (Llewellyn Falco's canonical term)
+   - DECISIONS_LOG sections → MADR (Context / Decision / Consequences) —
+     applied starting with THIS entry
+   - `LLM_INDEX.md` → `llms-full.txt` + `llms.txt` ([llmstxt.org](https://llmstxt.org/)
+     standard, 600+ adopters)
+   - Docs: add `docs/getting-started.md` (Diátaxis tutorial) + `docs/recipes/`
+     (how-to guides) alongside README
+   - Slash commands: `.claude/commands/*.md` → `.claude/skills/<name>/SKILL.md`
+     with YAML frontmatter (current Claude Code convention)
+6. **Acknowledge the JSONL-source-of-truth ceiling.** AI Landscape works
+   because it's *single-writer* (one cron, one user). Concurrent writers
+   need SQLite + WAL. The `/brainstorm` skill asks decision #2 in two
+   parts and pushes back firmly when the user says "concurrent."
+7. **Write three skill files at `~/.claude/skills/<name>/SKILL.md`** (not
+   in the AI Landscape repo — these are global workflow tools): `brainstorm`
+   (12-decision Q&A, refuses to write code), `mvp-build` (one-shot with
+   guardrails), `feedback-triage` (numbered-notes → fix-now / fix-next /
+   TODO). Seven other skill files (cache-first-llm, ci-pyramid,
+   secrets-audit, source-of-truth-refactor, cron-setup, decision-log,
+   llms-txt-refresh) are deferred to future sessions.
+
+### Consequences
+
+**Positive**
+
+- The next new-project session has a coherent, tested pipeline:
+  `/brainstorm` → `/mvp-build` → `/feedback-triage`. The first refuses to
+  code (forcing validated learning before generation, where it's cheap);
+  the second produces a complete working application in one pass with a
+  revertible skeleton checkpoint; the third triages real-app feedback.
+- `skills_plan.md` is now stress-tested against named experts and has a
+  "Terminology & file conventions (post-audit 2026-05-26)" table that
+  prevents drift back to the old names.
+- Future projects will produce `llms-full.txt` automatically, aligning
+  with the emerging 2025 LLM-docs convention.
+- The "user override of expert consensus on one-shot" is *recorded* —
+  future sessions know why this project chooses against the textbook.
+
+**Negative**
+
+- The "one-shot a full MVP" pattern remains a known-risky bet (every
+  named authority on LLM-assisted development recommends against it).
+  The bet rides on the user's taste + engagement collapsing the risk
+  during the conversation. If a future project produces a one-shot that
+  goes obviously wrong, the failure mode will be: "we built a complete,
+  well-tested app that solves the wrong problem." The walking-skeleton
+  checkpoint commit is the revert button.
+- The terminology migration is partial: existing `LLM_INDEX.md`,
+  "golden snapshot" test names, and free-form DECISIONS_LOG entries in
+  AI Landscape stay as-is. Going forward we use the new names, which
+  means future readers will see a vocabulary mismatch in older files.
+  Acceptable trade-off (migration is mechanical when someone has time).
+- Seven of the eleven planned skill files are deferred. The pipeline
+  works without them (brainstorm + mvp-build + feedback-triage are the
+  load-bearing trio), but skills like `/cache-first-llm` and
+  `/ci-pyramid` would speed up specific recurring tasks. Tracked as
+  TODO for future sessions.
+
+**Neutral**
+
+- Modular monolith, CLI-first, cache-first sidecar pattern, non-destructive
+  defaults, and the CI pyramid (with smoke-test-published-image) were all
+  *validated* by the audit research — these continue unchanged.
+- AI Landscape's own architecture would be re-produced by running
+  `/brainstorm` → `/mvp-build` against a hypothetical 2026-05-21
+  spec. Confidence check passed (audit verification step #3).
+
