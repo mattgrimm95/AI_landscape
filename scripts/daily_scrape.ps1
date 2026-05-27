@@ -87,13 +87,17 @@ if ($pythonCheck.Trim() -eq 'claude-code-cli') {
     } else {
         # Filter out the harmless "no stdin data received in 3s" warning
         # so the surfaced error line is the actual failure cause (e.g.
-        # "Not logged in · Please run /login").
+        # "Not logged in · Please run /login"). Also strip any
+        # token-shaped output as defense-in-depth -- claude.exe should
+        # never echo the token, but if a future bug ever did, we don't
+        # want the log to capture it.
         $signal = $authProbe | Where-Object {
             $_ -is [string] -and
             $_ -notmatch 'no stdin data received' -and
             $_ -notmatch '^\s*$' -and
             $_ -notmatch '^At line:' -and
-            $_ -notmatch '^\s*\+'
+            $_ -notmatch '^\s*\+' -and
+            $_ -notmatch 'sk-ant-'
         } | Select-Object -First 1
         $signalStr = ($signal -as [string]).Trim()
         Write-Log ("PREFLIGHT: WARN -- claude --print failed (exit $authExit): $signalStr")

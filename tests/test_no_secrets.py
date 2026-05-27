@@ -24,7 +24,7 @@ _STRONG_PATTERNS = {
     "GitHub fine-grained PAT": re.compile(r"\bgithub_pat_[0-9A-Za-z_]{50,}\b"),
     "Google API key": re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"),
     "Slack token": re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"),
-    "Anthropic API key": re.compile(r"\bsk-ant-[0-9A-Za-z_\-]{20,}\b"),
+    "Anthropic key (API or OAuth)": re.compile(r"\bsk-ant-[0-9A-Za-z_\-]{20,}\b"),
     "OpenAI-style API key": re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
 }
 
