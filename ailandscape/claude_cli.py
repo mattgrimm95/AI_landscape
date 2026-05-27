@@ -15,7 +15,7 @@ swap transports without code change.
 
 `find_cli()` looks for `claude` in this order:
   1. `$PATH` (the normal place for a CLI install)
-  2. `%APPDATA%\Claude\claude-code\<version>\claude.exe` — the Windows
+  2. `%APPDATA%\\Claude\\claude-code\\<version>\\claude.exe` — the Windows
      installer's default location. The highest version directory wins,
      so a side-by-side install upgrade is invisible to callers.
 

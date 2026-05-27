@@ -10,6 +10,9 @@ Usage:
     python -m ailandscape.cli stats      show corpus and database statistics
     python -m ailandscape.cli overview   print a statistical overview of the data
     python -m ailandscape.cli briefing   print a generated briefing of the landscape
+    python -m ailandscape.cli explain                print a structural overview of the whole system
+    python -m ailandscape.cli explain <module>       deep-dive a module (deps, tests, trust signals)
+    python -m ailandscape.cli explain <module> --narrative   add a Claude-generated narrative
     python -m ailandscape.cli trends     print temporal trends (volume, new/active entities)
     python -m ailandscape.cli review     audit data quality and accumulate findings in review.json
     python -m ailandscape.cli digest     email the daily digest (opt-in; needs SMTP env vars + recipients)
@@ -38,9 +41,9 @@ import sys
 import tempfile
 
 from . import (
-    ai_terms, briefing, config, corpus, emailer, enrich, feed_discovery,
-    pipeline, reconcile, report, review, scraper, synthesis, synthesis_cache,
-    trends, visualize,
+    ai_terms, briefing, config, corpus, emailer, enrich, explain as explain_mod,
+    feed_discovery, pipeline, reconcile, report, review, scraper, synthesis,
+    synthesis_cache, trends, visualize,
 )
 from . import feeds as feeds_mod
 from .storage_kg import KnowledgeGraphStore
@@ -240,6 +243,46 @@ def cmd_overview(args):
         ner_log.close()
         kg.close()
     print(text)
+    return 0
+
+
+def cmd_explain(args):
+    """Render a deterministic structural report on the codebase.
+
+    Default target is the whole system (one-line module summaries, every
+    CLI verb, every API endpoint, total test count). Pass a module short
+    name (e.g. `synthesis`, `synthesis_cache`, `pipeline`) to drill into
+    one module: public surface, imports, reverse-deps, which CLI verbs
+    and API endpoints reach it, test coverage, and trust signals
+    (docstring presence, TODO markers, last commit).
+
+    The structural output is always emitted first. With `--narrative`,
+    the same data is then handed to Claude (via the Claude Code CLI
+    transport) for a prose explanation; if the transport isn't
+    available, the structural output still prints and the narrative
+    falls back to an explanatory note.
+    """
+    try:
+        data = explain_mod.explain(args.target)
+    except FileNotFoundError as exc:
+        print("explain: {}".format(exc))
+        return 1
+    print(explain_mod.render(data))
+    if args.narrative:
+        try:
+            from . import claude_cli
+            if not claude_cli.is_available():
+                print(
+                    "\n[narrative is opt-in: Claude Code CLI not found on "
+                    "PATH and ANTHROPIC_API_KEY fallback not configured. "
+                    "Structural report above is the full deterministic "
+                    "output.]"
+                )
+            else:
+                text = explain_mod.narrate(data)
+                print("\nCLAUDE NARRATIVE\n" + "-" * 62 + "\n" + text)
+        except Exception as exc:
+            print("\n[narrative failed: {}]".format(exc))
     return 0
 
 
@@ -1082,6 +1125,22 @@ def build_parser():
         help="also generate an LLM analyst narrative (needs ANTHROPIC_API_KEY)",
     )
     brief_p.set_defaults(func=cmd_briefing)
+
+    explain_p = sub.add_parser(
+        "explain",
+        help="print a structural report on the system or a module "
+             "(deps, tests, trust signals)",
+    )
+    explain_p.add_argument(
+        "target", nargs="?", default="system",
+        help="'system' (default) for the whole-system overview, or a "
+             "module short name like 'synthesis' / 'pipeline'",
+    )
+    explain_p.add_argument(
+        "--narrative", action="store_true",
+        help="also ask Claude to weave a prose explanation from the report",
+    )
+    explain_p.set_defaults(func=cmd_explain)
 
     sub.add_parser(
         "trends", help="print temporal trends from the corpus and graph"

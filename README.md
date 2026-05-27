@@ -116,6 +116,20 @@ python -m ailandscape.cli reading [--list-stale] Claude-read coverage of the cor
 python -m ailandscape.cli review                 accumulate merge/ignore findings in review.json
 ```
 
+### Trust + understanding
+
+```
+python -m ailandscape.cli explain                       system overview: modules, CLI verbs, API endpoints, test counts
+python -m ailandscape.cli explain <module>              deep-dive: deps, reverse deps, tests, trust signals, last commit
+python -m ailandscape.cli explain <module> --narrative  + Claude-written prose explanation (needs Claude Code or API key)
+```
+
+`explain` AST-walks the codebase to produce a deterministic structural
+report — no LLM in the loop unless you pass `--narrative`. Useful when
+you want to trust the wiring is what you think it is: which CLI verbs
+touch a module, which tests cover it, when it was last committed, and
+whether it has any TODO/FIXME markers.
+
 ### Snapshots + LLM syntheses
 
 ```
