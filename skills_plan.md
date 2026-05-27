@@ -77,9 +77,9 @@ initiated through a prompt from a human
 * Brainstorm -> one-shot -> Plan/analyze/feedback -> routine maintenance and progression.
 * **User position (deliberate, recorded in DECISIONS_LOG 2026-05-26):** keep one-shot as the build mode for new MVPs, despite expert consensus (Cockburn / Hunt / Ries / Beck / Willison) favoring walking-skeleton-then-iterate. The bet: an engaged user with strong taste collapses the iterate-from-MVP risk by running the validated-learning loop *inside* the conversation rather than across separate sessions. Guardrails: non-skippable 12-decision brainstorm before any one-shot; walking-skeleton-shaped first commit so anything is revertible; immediate `/feedback-triage` follow-up.
 
-## 12-Decision Brainstorm (must answer before any `/mvp-build`)
+## 14-Decision Brainstorm (must answer before any `/mvp-build`)
 
-The `/brainstorm` skill walks all twelve and refuses to write code until each has a one-paragraph answer. Source: distilled from `DECISIONS_LOG.md` + expert practice (Brandolini's Event Storming for the domain/boundaries decisions).
+The `/brainstorm` skill walks all fourteen and refuses to write code until each has a one-paragraph answer. Source: distilled from `DECISIONS_LOG.md` + expert practice (Brandolini's Event Storming for the domain/boundaries decisions). Two of the fourteen (13, 14) are Claude-specific and can be answered "N/A — no LLM dependency" when a project doesn't use Claude.
 
 1. **Problem & user.** Who's the user, what's the trigger to open this tool, what does "MVP done" look like in one sentence.
 2. **Source of truth.** What *file* (not database) holds the canonical state. What's its schema. **Single-writer or concurrent?** Single-writer → flat file (JSONL) in git is fine. Concurrent → SQLite + WAL.
@@ -93,6 +93,12 @@ The `/brainstorm` skill walks all twelve and refuses to write code until each ha
 10. **Failure modes.** What's the noisiest input (malformed feed, missing field, rate-limit, timeout)? What does the app do when it fails — crash, skip, retry, archive? Failing silently is the disallowed default.
 11. **Observability.** What three things does every run log (start timestamp, end timestamp, counts)? What's the *one* metric an operator scans to know yesterday's run was healthy?
 12. **Data lifecycle.** When does data expire / archive / get deleted? Append-only-forever is a real choice; "rotate after N days" is also a choice. Pick before writing the writer.
+13. **Claude in automation.** Which Claude calls run unattended (cron, batch, webhook, scheduled refresh) vs. interactively (chat, dev session, on-demand)? For each unattended call: trigger, prompt template, output destination, behavior when Claude returns garbage or times out. Unattended Claude needs different scaffolding than interactive — non-interactive auth (long-lived token, not session-bound), deterministic prompts, idempotent output writes, retry policy. N/A if no LLM dependency.
+14. **Claude's friction points.** Where will Claude struggle in this project? Name ONE concrete output or judgment that needs careful prompting to get right, why it's hard (ambiguous domain / strict format / multi-step / niche knowledge), the acceptance bar for "good enough," how you'll detect when it's not met, and the fallback if Claude can't clear the bar. N/A if no LLM dependency.
+
+## Skill files: user-level source of truth, in-repo mirror
+
+The four current skills (`brainstorm`, `mvp-build`, `feedback-triage`, `explain`) live at user level under `~/.claude/skills/<name>/SKILL.md` so Claude Code loads them in every session on this machine. A committed mirror lives at `.claude/skills/<name>/SKILL.md` so the repo is portable: a fresh clone has the skill files and can re-seed user level. To sync (one-way, user → repo): `powershell -File scripts/sync_skills.ps1` before committing whenever a SKILL.md was edited at user level. Uses `robocopy /MIR` so deletions propagate too. Auth and credentials never enter the skill files.
 
 ## Terminology & file conventions (post-audit 2026-05-26)
 

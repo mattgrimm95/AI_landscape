@@ -2,6 +2,18 @@
 # Most recent at the top (per skills_plan.md). Mark done items with "[done]".
 # New items: insert at the very top.
 
+--- Local machine hardening to protect the cron's OAuth token (2026-05-27) ---
+# Context: the daily cron reads CLAUDE_CODE_OAUTH_TOKEN from the user-level
+# Windows env var (HKCU\Environment, plaintext). The token grants Claude Code
+# Max subscription access. Realistic threat = stolen/lost laptop + offline
+# registry extraction; BitLocker + Hello PIN close that gap with no impact
+# on how the cron or the code works. None of these items touches the project
+# repo -- they are personal-machine settings.
+* H1. Verify BitLocker is on. Settings -> "Device encryption" (or "BitLocker drive encryption"). If "Off", turn it on -- one click on Win11 Home with a TPM. Day-to-day usage is invisible; logs in with the normal Windows password / PIN.
+* H2. Confirm/backup the BitLocker recovery key. Settings -> "Manage BitLocker" -> "Back up your recovery key" -> save to Microsoft account (default; accessible later at https://aka.ms/myrecoverykey) AND print a paper copy as a belt-and-braces fallback. The recovery key is a 48-digit number Windows generates when BitLocker turns on; you need it if the TPM ever fails, the motherboard is replaced, or a BIOS update changes the boot measurement. Without it AND without the password, the disk is unrecoverable -- that is the whole point of encryption.
+* H3. Set up Windows Hello PIN. Settings -> Accounts -> Sign-in options -> "Windows Hello PIN" -> Add. PIN is bound to this device via the TPM (a 6-digit PIN from this laptop is useless on any other machine), so it is more secure than a typed password despite looking simpler. Forgot-PIN flow: "I forgot my PIN" on the lock screen -> reset via Microsoft account password. Optional follow-on: enable passwordless sign-in on the same Sign-in options page to remove the password as a daily attack surface entirely.
+* H4. Reminder: set a Microsoft account online password if you have not already (account.microsoft.com). This is the recovery anchor for both BitLocker (key archive at aka.ms/myrecoverykey) and Windows Hello PIN reset. If your machine is set up with a local-only account, H1-H3 still work but every recovery path becomes manual (printed paper, USB rescue disk). Linking a Microsoft account is the lowest-friction way to make sure forgetting the password is not catastrophic.
+
 --- Knowledge-graph UX & quality fixes (2026-05-22 evening) ---
 [done] * U1. Faster zoom — resolved: cy.wheelSensitivity raised from 0.25 to 0.7 and maxZoom from 3.5 to 4.0 in renderGraph() so each scroll-tick covers ~3x more zoom range.
 [done] * U2. Default view leads with specific, navigable entities — resolved: visualize.select_subgraph downranks a curated _GENERIC_GIANTS set ("Artificial Intelligence", "United States", "China", "Russia", "Ukraine", "Iran", country/group adjectives, "WASHINGTON") in the no-focus / no-type-filter landing view, so the top of the default graph now reads U.S. Army → U.S. Navy → U.S. Air Force → MIT → Pentagon → NATO → … instead of "AI"/"US" swamping by mention volume. The giants remain in the graph and reappear under a type filter or focus query.
