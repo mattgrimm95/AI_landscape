@@ -28,6 +28,30 @@ if (-not $python -or -not $git) {
     exit 1
 }
 
+# Prepend the Claude Code install dir to $env:PATH so `claude` is
+# discoverable to anything spawned from this script (the python preflight
+# uses APPDATA fallback in ailandscape.claude_cli.find_cli, but having
+# `claude` on PATH is the standard expectation and makes future updates
+# automatic). Picks the highest version directory the same way Python's
+# find_cli does -- a sort that's correct through 2.x.x.
+$claudeRoot = Join-Path $env:APPDATA 'Claude\claude-code'
+if (Test-Path $claudeRoot) {
+    $versionDirs = Get-ChildItem $claudeRoot -Directory -ErrorAction SilentlyContinue
+    $latest = $versionDirs | Sort-Object -Property @{Expression={
+        # Lexical sort on (major,minor,patch) so 2.10.x beats 2.9.x when
+        # we get there. Pad to 4 digits per part for safe string compare.
+        ($_.Name -split '\.' | ForEach-Object { '{0:D4}' -f [int]$_ }) -join '.'
+    }} -Descending | Select-Object -First 1
+    if ($latest -and (Test-Path (Join-Path $latest.FullName 'claude.exe'))) {
+        $env:PATH = $latest.FullName + ';' + $env:PATH
+        Write-Log ("PREFLIGHT: claude CLI dir prepended to PATH: " + $latest.FullName)
+    } else {
+        Write-Log ("PREFLIGHT: WARN -- no claude.exe found under " + $claudeRoot)
+    }
+} else {
+    Write-Log ("PREFLIGHT: WARN -- Claude install root not found at " + $claudeRoot)
+}
+
 # Pre-flight: which synthesis transport is available to this run?
 # The pipeline prefers the Claude Code CLI (uses the user's Max
 # subscription, no API billing); falls back to ANTHROPIC_API_KEY only
@@ -35,6 +59,49 @@ if (-not $python -or -not $git) {
 # day can be diagnosed by grep.
 $pythonCheck = & $python -c "from ailandscape import synthesis; t = synthesis.transport(); print(t or 'none')" 2>&1
 Write-Log ("PREFLIGHT: synthesis transport = " + $pythonCheck.Trim())
+
+# Auth check: even when the binary is discoverable, the CLI's
+# session-tied login state is NOT visible to a process spawned outside
+# Claude Code's own UI. The non-interactive fix is `claude setup-token`,
+# which generates a long-lived token tied to the user's Claude
+# subscription. Probe with a trivial prompt; on "Not logged in" emit a
+# clear remediation in the log so the failure isn't a silent skip.
+#
+# Also surface whether the well-known token env vars are set so a
+# "token went missing" failure mode (uninstalled Claude Code, evicted
+# from credential manager, etc.) is grep-able. We do NOT print the
+# token itself.
+if ($pythonCheck.Trim() -eq 'claude-code-cli') {
+    $tokenVars = @('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_OAUTH_TOKEN', 'CLAUDE_AUTH_TOKEN')
+    $tokenSet  = $tokenVars | Where-Object { [Environment]::GetEnvironmentVariable($_, 'Process') }
+    if ($tokenSet) {
+        Write-Log ("PREFLIGHT: token env var present: " + ($tokenSet -join ', '))
+    } else {
+        Write-Log "PREFLIGHT: no known token env var set (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN / CLAUDE_AUTH_TOKEN). Cron auth will rely on whatever ``claude setup-token`` configured."
+    }
+
+    $authProbe = & claude --print --output-format text 'ping' 2>&1
+    $authExit = $LASTEXITCODE
+    if ($authExit -eq 0) {
+        Write-Log "PREFLIGHT: claude --print auth probe OK (cron synthesis enabled)"
+    } else {
+        # Filter out the harmless "no stdin data received in 3s" warning
+        # so the surfaced error line is the actual failure cause (e.g.
+        # "Not logged in · Please run /login").
+        $signal = $authProbe | Where-Object {
+            $_ -is [string] -and
+            $_ -notmatch 'no stdin data received' -and
+            $_ -notmatch '^\s*$' -and
+            $_ -notmatch '^At line:' -and
+            $_ -notmatch '^\s*\+'
+        } | Select-Object -First 1
+        $signalStr = ($signal -as [string]).Trim()
+        Write-Log ("PREFLIGHT: WARN -- claude --print failed (exit $authExit): $signalStr")
+        if ($authProbe -match 'Not logged in') {
+            Write-Log "PREFLIGHT:   remediation: run ``claude setup-token`` interactively once to generate a long-lived token; set the resulting token as a system env var so Task Scheduler inherits it."
+        }
+    }
+}
 
 # 1. Scrape feeds into the corpus and rebuild the derived databases. The
 #    rebuild step also writes today's synthesis sidecar (hype + briefing
