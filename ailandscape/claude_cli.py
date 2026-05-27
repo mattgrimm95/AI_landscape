@@ -40,35 +40,69 @@ import subprocess
 DEFAULT_MODEL = None  # let `claude` decide
 DEFAULT_TIMEOUT = 180  # seconds — large prompts can take a while
 
-# Windows installer drops versioned subdirectories under this path; the
-# highest version is the one Claude Code actually launches as the GUI.
-_WIN_INSTALL_ROOT = pathlib.Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code"
-
-
 class ClaudeCliError(Exception):
     """Raised when the CLI is missing, errors out, or returns no text."""
+
+
+def _candidate_install_roots():
+    """Yield possible Claude Code install directory roots on Windows.
+
+    Two install shapes seen in the wild:
+
+    1. Regular Win32 install at ``%APPDATA%\\Claude\\claude-code\\<version>\\claude.exe``.
+       Also the path visible to *packaged* callers running inside Claude
+       Code Desktop's MSIX container, as a reflection of (2).
+
+    2. MSIX / Microsoft Store install at
+       ``%LOCALAPPDATA%\\Packages\\Claude_<hash>\\LocalCache\\Roaming\\Claude\\claude-code\\<version>\\claude.exe``.
+       This is the canonical on-disk location for the Store-distributed
+       Claude Code Desktop; the Roaming reflection in (1) is virtualized
+       and may not be visible to non-packaged processes (e.g. an
+       interactive PowerShell window or a Task Scheduler job).
+
+    Yielding both means ``find_cli()`` works regardless of which install
+    shape the user has and which process context is calling us.
+    """
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        yield pathlib.Path(appdata) / "Claude" / "claude-code"
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        packages = pathlib.Path(local) / "Packages"
+        if packages.exists():
+            for pkg in sorted(packages.glob("Claude_*")):
+                root = pkg / "LocalCache" / "Roaming" / "Claude" / "claude-code"
+                if root.exists():
+                    yield root
 
 
 def find_cli():
     """Return the absolute path to the `claude` executable, or None.
 
-    Checks $PATH first (which is what any well-installed CLI should be on),
-    then the Windows installer location.
+    Checks $PATH first (which is what any well-installed CLI should be
+    on), then iterates the Windows install candidates from
+    `_candidate_install_roots()`. Picks the highest version directory
+    within each root.
     """
     on_path = shutil.which("claude")
     if on_path:
         return on_path
-    if _WIN_INSTALL_ROOT.exists():
-        # Pick the highest version dir. Version strings sort lexically
-        # correctly for 2.1.x at this stage of Claude Code; an upgrade
-        # to 2.10.x would break that, but the cost of being wrong is a
-        # stale-binary one-shot, not a security issue.
-        versions = sorted(
-            (p for p in _WIN_INSTALL_ROOT.iterdir() if p.is_dir()),
-            key=lambda p: tuple(int(x) if x.isdigit() else 0
-                                for x in p.name.split(".")),
-            reverse=True,
-        )
+    for root in _candidate_install_roots():
+        # Pick the highest version dir. Tuple-of-ints sort handles
+        # 2.10.x > 2.9.x correctly; the lexical fallback (0 for
+        # non-numeric parts) keeps oddly-named dirs from crashing the
+        # sort.
+        try:
+            versions = sorted(
+                (p for p in root.iterdir() if p.is_dir()),
+                key=lambda p: tuple(
+                    int(x) if x.isdigit() else 0
+                    for x in p.name.split(".")
+                ),
+                reverse=True,
+            )
+        except OSError:
+            continue
         for version_dir in versions:
             candidate = version_dir / "claude.exe"
             if candidate.exists():

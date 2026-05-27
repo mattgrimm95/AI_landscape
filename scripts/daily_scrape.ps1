@@ -29,27 +29,48 @@ if (-not $python -or -not $git) {
 }
 
 # Prepend the Claude Code install dir to $env:PATH so `claude` is
-# discoverable to anything spawned from this script (the python preflight
-# uses APPDATA fallback in ailandscape.claude_cli.find_cli, but having
-# `claude` on PATH is the standard expectation and makes future updates
-# automatic). Picks the highest version directory the same way Python's
-# find_cli does -- a sort that's correct through 2.x.x.
-$claudeRoot = Join-Path $env:APPDATA 'Claude\claude-code'
-if (Test-Path $claudeRoot) {
-    $versionDirs = Get-ChildItem $claudeRoot -Directory -ErrorAction SilentlyContinue
-    $latest = $versionDirs | Sort-Object -Property @{Expression={
-        # Lexical sort on (major,minor,patch) so 2.10.x beats 2.9.x when
-        # we get there. Pad to 4 digits per part for safe string compare.
-        ($_.Name -split '\.' | ForEach-Object { '{0:D4}' -f [int]$_ }) -join '.'
-    }} -Descending | Select-Object -First 1
+# discoverable to anything spawned from this script. Two install shapes:
+#
+#   (a) Regular Win32: %APPDATA%\Claude\claude-code\<version>\claude.exe
+#       Also the reflection seen by *packaged* callers inside Claude
+#       Code Desktop's MSIX container.
+#
+#   (b) MSIX / Microsoft Store:
+#       %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\
+#       claude-code\<version>\claude.exe
+#       The canonical location for Store-distributed Claude Code Desktop;
+#       the Roaming reflection in (a) is virtualized and invisible to
+#       non-packaged processes like an interactive PowerShell or a Task
+#       Scheduler job.
+#
+# We try (a) first, fall back to (b). Whichever wins, we pick the
+# highest version subdirectory using a 4-digit-padded sort so 2.10.x
+# beats 2.9.x when we get there.
+$candidateRoots = @()
+$candidateRoots += (Join-Path $env:APPDATA 'Claude\claude-code')
+$msixPackages = Join-Path $env:LOCALAPPDATA 'Packages'
+if (Test-Path $msixPackages) {
+    Get-ChildItem $msixPackages -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue | ForEach-Object {
+        $candidateRoots += (Join-Path $_.FullName 'LocalCache\Roaming\Claude\claude-code')
+    }
+}
+
+$discovered = $null
+foreach ($root in $candidateRoots) {
+    if (-not (Test-Path $root)) { continue }
+    $latest = Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+        Sort-Object -Property @{Expression={
+            ($_.Name -split '\.' | ForEach-Object { '{0:D4}' -f [int]$_ }) -join '.'
+        }} -Descending | Select-Object -First 1
     if ($latest -and (Test-Path (Join-Path $latest.FullName 'claude.exe'))) {
         $env:PATH = $latest.FullName + ';' + $env:PATH
         Write-Log ("PREFLIGHT: claude CLI dir prepended to PATH: " + $latest.FullName)
-    } else {
-        Write-Log ("PREFLIGHT: WARN -- no claude.exe found under " + $claudeRoot)
+        $discovered = $latest.FullName
+        break
     }
-} else {
-    Write-Log ("PREFLIGHT: WARN -- Claude install root not found at " + $claudeRoot)
+}
+if (-not $discovered) {
+    Write-Log ("PREFLIGHT: WARN -- no claude.exe found under APPDATA or MSIX Packages. Tried: " + ($candidateRoots -join '; '))
 }
 
 # Pre-flight: which synthesis transport is available to this run?
