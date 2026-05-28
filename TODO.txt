@@ -2,6 +2,83 @@
 # Most recent at the top (per skills_plan.md). Mark done items with "[done]".
 # New items: insert at the very top.
 
+--- manual_edges.json — first-class API for Claude-asserted relationships (2026-05-27) ---
+# Closes a real gap surfaced by the question "where do Claude-derived entities
+# and relationships get saved?" Today the answer is "in corpus text only,
+# and only as edges if the rule extractor happens to recognize the wording."
+# This task makes Claude (or a human) able to assert an edge directly while
+# preserving the deterministic-rebuild invariant.
+#
+# What Claude currently does
+#   * Web-research + synthesize an entity dossier (`enrich.add_synthesis`) ->
+#     dossier text appended to corpus/documents.jsonl as a regular record
+#     with metadata.synthesis=true and source="Claude synthesis".
+#   * The next rebuild runs NER over the dossier text -> nodes appear in the
+#     KG just like any scraped article.
+#   * `ailandscape/relations.py` (rule-based, regex + sentence-boundary +
+#     passive-voice flip) scans the same text for cue phrases it recognizes
+#     ("supplies", "partners with", "awarded ... contract by", "develops",
+#     "acquires", a few more) -> matching wording becomes typed edges.
+#   * Daily hype + briefing narratives (`synthesize-daily`) write to
+#     snapshots/syntheses/YYYY-MM-DD.json -- served verbatim by /api/hype
+#     and /api/briefing/narrative; do NOT feed the KG.
+#
+# What Claude does NOT do today
+#   * Assert a typed edge directly. There is no API surface where Claude (or
+#     a human) can say "Palantir -> supplies -> Pentagon, evidence='...', this
+#     edge exists in the KG starting now." Every edge in data/knowledge_graph.db
+#     is rule-extracted from corpus text.
+#   * Capture relationships whose wording the rule extractor doesn't match.
+#     Examples that land in dossier text but not in the KG today:
+#       - "Anduril is a strategic ally of Palantir."  (no "strategic ally" cue)
+#       - "X has emerged as the leading vendor for Y." ("emerged as" not a verb)
+#       - "Maven underpins Pentagon targeting workflows." ("underpins" not in
+#         the rule set; "targeting workflows" not a recognized object phrase)
+#     The entity NAMES still get picked up by NER -> they appear as nodes -- but
+#     the relationship is invisible in the graph view, only findable by reading
+#     the dossier text in the article reader.
+#   * Capture relationships from sources that aren't in the corpus -- e.g. a
+#     fact from a podcast, an off-the-record conversation, a paywall article,
+#     or domain knowledge the operator just knows. Today there's nowhere to
+#     put that fact except as prose inside a synthesis dossier.
+#
+# What it could do (this TODO)
+#   * Add corpus-level `manual_edges.json`, structurally parallel to
+#     corrections.json. Schema:
+#       {
+#         "edges": [
+#           {
+#             "source": "Palantir",
+#             "relation": "supplies",
+#             "target": "Pentagon",
+#             "object": "Maven Smart System",            # optional
+#             "evidence": "Per Q1 2026 earnings call...", # required
+#             "confidence": 0.9,                          # optional, default 1.0
+#             "added_by": "claude" | "manual",
+#             "added_at": "2026-05-27"
+#           }
+#         ]
+#       }
+#   * Apply in `reconcile` after the rule extractor runs, before edges land
+#     in the KG. Deduplicate against rule-extracted edges (same source +
+#     relation + target = single edge, manual confidence wins).
+#   * Commit `manual_edges.json` -- it becomes part of the deterministic
+#     rebuild chain (corpus + corrections + manual_edges -> identical KG on
+#     every machine).
+#   * Surface in the web app's edge tooltip: "Source: rule extractor" vs
+#     "Source: manual assertion (added 2026-05-27, evidence: ...)" so a
+#     reader can audit why an edge exists.
+#   * New CLI verb `assert-edge` for ergonomics:
+#       ailandscape assert-edge "Palantir" supplies "Pentagon" \
+#         --object "Maven Smart System" --evidence "Q1 2026 earnings call..."
+#   * Tests:
+#       - manual_edges.json applies idempotently across rebuilds (SHA-256
+#         round-trip on the KG stays identical)
+#       - dedupe against rule-extracted edges works (no double-counting)
+#       - schema validation rejects edges missing required fields
+#       - the no-secrets guard already catches anything sk-ant-* shaped if
+#         a Claude evidence quote ever happens to look like a token
+
 --- Local machine hardening to protect the cron's OAuth token (2026-05-27) ---
 # Context: the daily cron reads CLAUDE_CODE_OAUTH_TOKEN from the user-level
 # Windows env var (HKCU\Environment, plaintext). The token grants Claude Code
