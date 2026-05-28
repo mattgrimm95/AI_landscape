@@ -57,6 +57,7 @@
 * Include CLI design.
 * Containerize design.
 * Code re-use including open libraries when it makes sense.
+* Include data provenance when possible in application user interfaces.
 
 ## Project Characteristics
 
@@ -77,9 +78,9 @@ initiated through a prompt from a human
 * Brainstorm -> one-shot -> Plan/analyze/feedback -> routine maintenance and progression.
 * **User position (deliberate, recorded in DECISIONS_LOG 2026-05-26):** keep one-shot as the build mode for new MVPs, despite expert consensus (Cockburn / Hunt / Ries / Beck / Willison) favoring walking-skeleton-then-iterate. The bet: an engaged user with strong taste collapses the iterate-from-MVP risk by running the validated-learning loop *inside* the conversation rather than across separate sessions. Guardrails: non-skippable 12-decision brainstorm before any one-shot; walking-skeleton-shaped first commit so anything is revertible; immediate `/feedback-triage` follow-up.
 
-## 14-Decision Brainstorm (must answer before any `/mvp-build`)
+## 15-Decision Brainstorm (must answer before any `/mvp-build`)
 
-The `/brainstorm` skill walks all fourteen and refuses to write code until each has a one-paragraph answer. Source: distilled from `DECISIONS_LOG.md` + expert practice (Brandolini's Event Storming for the domain/boundaries decisions). Two of the fourteen (13, 14) are Claude-specific and can be answered "N/A — no LLM dependency" when a project doesn't use Claude.
+The `/brainstorm` skill walks all fifteen and refuses to write code until each has a one-paragraph answer. Source: distilled from `DECISIONS_LOG.md` + expert practice (Brandolini's Event Storming for the domain/boundaries decisions). Two of the fifteen (13, 14) are Claude-specific and can be answered "N/A — no LLM dependency" when a project doesn't use Claude. Decision #15 (source control + publication) gates the no-secrets test as a non-negotiable pre-push check enforced by `/mvp-build`.
 
 1. **Problem & user.** Who's the user, what's the trigger to open this tool, what does "MVP done" look like in one sentence.
 2. **Source of truth.** What *file* (not database) holds the canonical state. What's its schema. **Single-writer or concurrent?** Single-writer → flat file (JSONL) in git is fine. Concurrent → SQLite + WAL.
@@ -95,6 +96,7 @@ The `/brainstorm` skill walks all fourteen and refuses to write code until each 
 12. **Data lifecycle.** When does data expire / archive / get deleted? Append-only-forever is a real choice; "rotate after N days" is also a choice. Pick before writing the writer.
 13. **Claude in automation.** Which Claude calls run unattended (cron, batch, webhook, scheduled refresh) vs. interactively (chat, dev session, on-demand)? For each unattended call: trigger, prompt template, output destination, behavior when Claude returns garbage or times out. Unattended Claude needs different scaffolding than interactive — non-interactive auth (long-lived token, not session-bound), deterministic prompts, idempotent output writes, retry policy. N/A if no LLM dependency.
 14. **Claude's friction points.** Where will Claude struggle in this project? Name ONE concrete output or judgment that needs careful prompting to get right, why it's hard (ambiguous domain / strict format / multi-step / niche knowledge), the acceptance bar for "good enough," how you'll detect when it's not met, and the fallback if Claude can't clear the bar. N/A if no LLM dependency.
+15. **Source control + publication.** Should `/mvp-build` (a) `git init` the scaffold, (b) commit subsystems as it builds, (c) push to a remote (GitHub / GitLab / Bitbucket)? If pushing: URL + visibility. **The no-secrets guard test (`tests/test_no_secrets.py`) is a hard gate before any push** — `/mvp-build` runs it explicitly in its Step 4 and blocks the push if anything is detected. This is non-negotiable per the project's security rules.
 
 ## Skill files: user-level source of truth, in-repo mirror
 

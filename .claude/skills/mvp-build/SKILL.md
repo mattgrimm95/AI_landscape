@@ -17,7 +17,7 @@ You are about to build a complete MVP in one sustained pass. This is a deliberat
 
 1. Read the spec. Default path: `./mvp-spec.md`. If a different path was passed as argument, use it.
 2. If the file doesn't exist: tell the user to run `/brainstorm` first, then stop.
-3. **Verify all twelve decisions are answered.** If any section is empty, says "TBD," or is obviously a placeholder, stop and ask the user to complete it via `/brainstorm`. Do not improvise around an ambiguous spec — that's the failure mode this skill exists to prevent.
+3. **Verify all fifteen decisions are answered.** If any section is empty, says "TBD," or is obviously a placeholder, stop and ask the user to complete it via `/brainstorm`. Do not improvise around an ambiguous spec — that's the failure mode this skill exists to prevent. Pay special attention to decision #15 (source control + publication) — it drives whether you commit at all, and whether you push at the end.
 
 ### Step 2 — Build the walking skeleton AS ITS OWN COMMIT
 
@@ -64,12 +64,49 @@ Each subsystem gets its own commit so the history reads as a build log. Order:
 10. **`.github/workflows/docker.yml`** (if container is in spec) — build verify on every PR + push, build-and-push to GHCR on main, **smoke-test-published-image job** that pulls the just-published image by SHA tag, runs it, polls a real endpoint for HTTP 200 within 60s. The smoke-test step's existence catches the class of bugs (bind address, missing files, broken startup) that unit tests can't see.
 11. **`Dockerfile`** (multi-stage, non-root user, healthcheck, derived DBs pre-built so the image ships ready-to-serve) + **`docker-compose.yml`** (bind-mounts the derived-data dir for persistence) if container is in spec.
 
-### Step 4 — Final message to the user
+### Step 4 — Verify before publishing (HARD GATE)
+
+Before any push, before the final user message, run the full test suite — and ESPECIALLY the no-secrets guard test — as an explicit verification step. This is not a "remember to also do this" item; it is the gate that stands between the local build and any push to a remote.
+
+```bash
+# 1. Full test suite must pass (catches build correctness)
+python -m unittest discover -s tests -t .
+
+# 2. No-secrets guard must explicitly pass (catches accidental credential leaks)
+python -m unittest tests.test_no_secrets -v
+```
+
+If EITHER fails:
+- **STOP. Do not push. Do not proceed to Step 5 or Step 6.**
+- Surface what failed to the user (test name + assertion message). For `test_no_secrets`, name the file path the pattern matched in — but **NEVER echo the matched value back to the user, to the chat, or to a log**. The pattern name (e.g. "Anthropic key (API or OAuth)") plus the file path is enough to act on.
+- Ask the user how to proceed (remove the leak and re-run? unstage the file? mark as false-positive in the test?).
+- Do NOT amend earlier commits to "hide" a leak — the secret stays in git history. If a real secret was committed locally, the only safe path is to ROTATE the credential and restart the build.
+
+If both pass: continue to Step 5.
+
+### Step 5 — Publish (only if spec decision #15 says to)
+
+Read spec decision #15. Three possibilities:
+
+- **"no git entirely"**: skip this step. Leave the scaffold as a plain directory. The user has chosen to manage source control themselves (or not at all).
+- **"yes git, no push"** or **"yes git, push later (no remote URL yet)"**: the walking-skeleton commit (Step 2) and per-subsystem commits (Step 3) are already in place locally. Do nothing further. The final message (Step 6) reminds the user how to add a remote and push manually.
+- **"yes git, push to <URL>, <public|private>"**: only at this point — and only because Step 4 passed — execute the push:
+  ```bash
+  git remote add origin <URL>     # only if no remote yet
+  git push -u origin main
+  ```
+  If the remote doesn't exist yet (e.g. the user gave a GitHub URL but hasn't created the repo), use `gh repo create <URL> --<public|private> --source=. --push` if `gh` is installed; otherwise stop and ask the user to create the empty repo first.
+
+**NEVER push with `--force`. NEVER push to a branch other than the one the spec named (default: main). NEVER push if Step 4 failed for any reason — even if the user explicitly asks.** The no-secrets gate is non-negotiable per the project's security rules.
+
+### Step 6 — Final message to the user
 
 ```
 MVP scaffolded:
 - Walking-skeleton checkpoint at commit {sha-of-skeleton}
 - Full build at HEAD
+- Tests: {N} passed (including no-secrets guard)
+- Source control: {one of: "no git (per your spec)" | "git initialized, {M} commits, no remote yet — add one with `git remote add origin <URL>` then `git push -u origin main`" | "git initialized, {M} commits, pushed to <URL>"}
 
 This is a STARTING POINT, not a final implementation. The expert-consensus
 posture (Willison, Beck, et al.) is that LLM-generated code is "the first
@@ -96,6 +133,7 @@ move.
 - **Tests by strategy, not by count.** The ~30 figure is rough — what matters is that approval + property + adversarial + no-secrets are each represented.
 - **`DECISIONS_LOG.md` uses MADR.** Context / Decision / Consequences sections. NOT "Why / Change / Verification."
 - **`CLAUDE.md` stays short** (load-once-per-session). The function index belongs in `llms-full.txt`.
-- **DO NOT push to a remote.** Commit locally; let the user push when they've reviewed.
+- **The no-secrets guard test is a HARD GATE.** Step 4 runs `python -m unittest tests.test_no_secrets` explicitly. A failure here BLOCKS all pushes, no matter what spec decision #15 says — that decision authorizes pushing in principle, but the no-secrets test authorizes it in practice. Never amend prior commits to hide a leak; rotate the credential and restart.
+- **Push behavior is driven by spec decision #15, not by default.** If the spec says "no git" or "no push," respect it. If the spec says "push to URL," push (after Step 4 passes). Never push to a remote the spec didn't name. Never use `--force`. Never push to a branch other than the one the spec named.
 - **DO NOT execute any destructive action.** No `git push --force`, no `rm -rf`, no DB drops. Even if it would speed things up.
 - **STOP and ask** if you hit any ambiguity in the spec or a blocker you can't resolve (dep install fails, an external service is unreachable, etc.). Do NOT improvise.
