@@ -2,7 +2,8 @@
 name: brainstorm
 description: Run the 14-decision MVP brainstorm for a new software project. Refuses to write code until all fourteen decisions have a one-paragraph answer. Outputs mvp-spec.md ready for /mvp-build. Trigger when the user wants to start a new project, asks for help brainstorming an app, or says "let's plan an MVP."
 allowed-tools: AskUserQuestion, Read, Write
-model: sonnet
+model: claude-opus-4-7
+effort: max
 argument-hint: <one-line project description>
 ---
 

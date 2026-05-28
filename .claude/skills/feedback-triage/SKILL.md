@@ -2,7 +2,8 @@
 name: feedback-triage
 description: Convert numbered user feedback notes about a running MVP into a triaged action list (fix-now / fix-next / TODO) with file paths and minimal-diff plans. Runs after the user has touched the MVP. Trigger when the user pastes numbered notes about what's wrong with the app, says "here's feedback from using the app," or asks to triage feedback.
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, AskUserQuestion
-model: sonnet
+model: claude-opus-4-7
+effort: max
 argument-hint: [paste of numbered notes, or path to a notes file]
 ---
 
