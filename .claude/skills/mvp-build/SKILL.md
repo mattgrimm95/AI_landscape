@@ -1,6 +1,7 @@
 ---
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion
+name: mvp-build
 description: One-shot build a complete MVP from a /brainstorm spec. Reads mvp-spec.md, builds source-of-truth file + sample fixture + package layout + full CLI + API endpoints + frontend + ~30 tests + README + DECISIONS_LOG seed + llms.txt + CI workflows. Walking-skeleton-shaped first commit preserves revertibility. Tells the user to run /feedback-triage immediately. Trigger after /brainstorm has produced mvp-spec.md.
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion
 model: sonnet
 argument-hint: [path/to/mvp-spec.md, defaults to ./mvp-spec.md]
 ---

@@ -1,6 +1,7 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
+name: explain
 description: Explain a part of the AI Landscape codebase (or whatever Python project the user is in) using a deterministic structural report as the foundation. Trigger when the user says "explain X", "how does X work", "walk me through X", "what does X module do", "show me the system", or asks to understand critical paths, dependencies, tests, or trust signals of a code component.
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 model: sonnet
 argument-hint: <module name | "system" | CLI verb | "/api/path">
 ---
