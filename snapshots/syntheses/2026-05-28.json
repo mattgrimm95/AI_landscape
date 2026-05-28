@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-28",
+  "generated_at": "2026-05-28T23:09:57+00:00",
+  "corpus_mtime": "2026-05-28T23:07:20+00:00",
+  "corpus_documents": 526,
+  "hype": {
+    "available": true,
+    "text": "The Pentagon just mapped out **$50 billion in drone warfare spending** — and the hardware is already proving itself. This past fall, the U.S. Navy used a combined swarm of aerial and maritime drones to sink a retired warship, a live-fire proof-of-concept now reshaping procurement. Meanwhile, the Defense Innovation Unit handed Hermeus an additional **$159 million** to push its Quarterhorse drone toward high-speed payload release — hypersonic strike logistics, essentially. On the ground, the Army strapped rockets onto a resupply drone at Fort [tests], turning a logistics bird into a fire platform overnight. Layer in the DOD's **$2 billion-plus** request to unify command-and-control across combatant commands, and a picture snaps into focus: the U.S. military isn't just buying drones, it's rewiring its entire kill chain around autonomous systems. The pace is accelerating faster than the bureaucracy can staff it — Tech Force has onboarded just 10 of its promised 1,000 technologists. The machines aren't waiting.",
+    "window_days": 1,
+    "documents_used": 61,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "**INTELLIGENCE BRIEF — AI NATIONAL SECURITY LANDSCAPE**\n*As of dataset snapshot | 526 documents, 11,251 entities*\n\n---\n\n**LEAD:** The U.S. defense establishment is accelerating AI procurement across all domains. The Pentagon, NATO, U.S. Space Force, and BARREL have awarded contracts to Perennial Autonomy, Palantir, and SpaceX respectively, signaling broad institutionalization of autonomous and space-based AI capabilities.\n\n**COMMERCIAL-DEFENSE INTEGRATION:** OpenAI, NVIDIA, and Google DeepMind dominate the AI supply and development landscape. OpenAI's acquisition of Tomoro and its direct AI supply relationship with the Pentagon are notable. Google DeepMind is developing both a **Merops interceptor** and a program flagged as **Google Antigravity** — suggesting advanced defense R&D activity.\n\n**THREAT SIGNALS:** SpaceX appears in a relationship flagged as supplying **Iranian** entities — a potential sanctions-compliance concern requiring further investigation.\n\n**CHINA FACTOR:** China ranks as the second most active entity in the corpus, underscoring persistent great-power competition as the dominant framing across documents.\n\n**LEADERSHIP:** Dan Richard now leads both the CIA and its Digital Innovation Directorate, centralizing AI-intelligence integration under a single authority.\n\n**WATCH:** Collaborative Combat Aircraft and Electronic Warfare rank among the top trending military-AI topics.",
+    "window_days": 7,
+    "documents_used": 526,
+    "error": ""
+  }
+}
