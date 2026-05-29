@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-29",
+  "generated_at": "2026-05-29T23:08:16+00:00",
+  "corpus_mtime": "2026-05-29T23:06:06+00:00",
+  "corpus_documents": 547,
+  "hype": {
+    "available": true,
+    "text": "The U.S. Army isn't waiting for bureaucracy — it's already shipping **jailbroken systems to troops in the Middle East in real time**. Operation Jailbreak, a 30-day sprint out of Colorado Springs, has defense contractors cracking open their proprietary systems and forcing them to talk to each other, with software patches flowing straight to CENTCOM forces as engineers write them. This is live warfighting experimentation at speed, and it's happening now.\n\nMeanwhile, SpaceX just landed a **$4.16 billion Space Force contract** to build a space-based air-tracking sensor network — eyes in orbit watching every moving aircraft on Earth, with an early operational capability reportedly in sight.\n\nOn the policy front, the federal government now runs **3,600 AI use cases** — a 70% jump year-over-year. VP Vance told Air Force Academy graduates to keep humans in the decision loop. The machines are moving fast enough that the warning already feels urgent.",
+    "window_days": 1,
+    "documents_used": 46,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "**AI NATIONAL-SECURITY LANDSCAPE — INTELLIGENCE BRIEF**\n*29 May 2026 | Based on 547 documents, 11,482 entities*\n\n---\n\n**LEAD:** U.S. defense AI procurement is accelerating rapidly. The Pentagon has awarded contracts for autonomous systems (Perennial Autonomy) and commercial satellite communications, while the Space Force and BARREL program both awarded contracts to SpaceX. NATO has contracted Palantir, signaling allied AI integration.\n\n**COMMERCIAL-TO-DEFENSE PIPELINE:** OpenAI, NVIDIA, Google DeepMind, Cisco, and Uber are all active AI developers in this corpus. OpenAI's acquisition of Tomoro and its direct AI supply relationships with defense customers mark a deepening commercial-military nexus. NVIDIA supplies AI infrastructure broadly across the ecosystem.\n\n**EMERGING CAPABILITIES:** Trending topics include Collaborative Combat Aircraft, Autonomous Systems, and Electronic Warfare — indicating AI's shift from analytics toward kinetic and contested-environment applications. Google DeepMind's development of the **Merops interceptor** is a notable weapons-adjacent signal.\n\n**GEOPOLITICAL CONTEXT:** China, Ukraine, and the Trump administration are among the most active entities, reflecting ongoing great-power competition as the primary demand driver for defense AI investment.",
+    "window_days": 7,
+    "documents_used": 317,
+    "error": ""
+  }
+}
