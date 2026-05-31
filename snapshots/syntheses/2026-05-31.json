@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-31",
+  "generated_at": "2026-05-31T23:08:19+00:00",
+  "corpus_mtime": "2026-05-31T23:05:50+00:00",
+  "corpus_documents": 549,
+  "hype": {
+    "available": true,
+    "text": "Quiet day in the AI news cycle — but here's a gem worth your 30 seconds. A retrospective on Richard Greenhill's 1987 DIY humanoid robot is making the rounds, and it's a reminder of how wild the roots of modern robotics really are. A self-taught British photographer — zero formal training — decided he'd build a life-size bipedal robot capable of carrying luggage, and he did it using pneumatic \"air-muscles\" instead of conventional motors. No PhD. No lab. Just obsession and compressed air. That same contrarian hardware instinct now powers the teams building Boston Dynamics' Atlas and Figure AI's humanoids. The field has always attracted brilliant outsiders who refused the consensus. Today's billion-dollar bipedal bets trace a direct lineage back to garage tinkerers like Greenhill. The insurgents of 1987 are the blueprints of 2026.",
+    "window_days": 1,
+    "documents_used": 1,
+    "error": ""
+  },
+  "briefing_narrative": {
+    "available": true,
+    "text": "**AI National Security Landscape — Intelligence Brief**\n*31 May 2026 | Based on 549-document corpus*\n\n---\n\n**Bottom line up front:** The U.S. defense-AI ecosystem is accelerating rapidly, with the Pentagon, Space Force, and NATO all issuing fresh AI-related contracts while commercial AI firms deepen integration into government and military operations.\n\n**Key developments:** The Pentagon awarded the Perennial Autonomy contract, signaling continued investment in autonomous systems, while SpaceX received awards from both the Space Force and BARREL. NATO contracted Palantir, reinforcing allied AI-C2 alignment. OpenAI's acquisition of Tomoro and its active AI supply relationships indicate expanding commercial-to-defense pipelines.\n\n**Technology vectors:** Agentic AI, Collaborative Combat Aircraft, and Electronic Warfare are emerging alongside foundational ML and LLM adoption — pointing toward autonomous multi-domain operations as the near-term doctrinal priority.\n\n**Competitive context:** China and Ukraine remain prominent entities alongside the U.S., underscoring active great-power and active-conflict dimensions. Google DeepMind's development of a \"Merops interceptor\" warrants close monitoring as a potential counter-UAS or directed-energy signal.\n\n**Watch:** NVIDIA's dual commercial-defense AI supply role and OpenAI's government-facing posture represent growing single-vendor concentration risk.",
+    "window_days": 7,
+    "documents_used": 310,
+    "error": ""
+  }
+}
